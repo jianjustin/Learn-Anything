@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>全部课程</title>
+<!-- 总览页：读取同目录的 index-data.js（window.LEARN_INDEX），再逐个读取各课目录里的 course-data.js，
+     每 5 秒重新读取一次。单文件，不引用任何外部资源，直接用浏览器打开即可。 -->
+<style>
+:root {
+  --bg: #f6f5f1;
+  --surface: #ffffff;
+  --surface-2: #f0eee8;
+  --ink: #1d2126;
+  --ink-2: #4f5761;
+  --ink-3: #868d96;
+  --line: #e3e0d8;
+  --line-strong: #cfcbc1;
+  --accent: #2c6a5a;
+  --accent-ink: #1f4f42;
+  --accent-soft: #e2efe9;
+  --done: #4d6a86;
+  --done-soft: #e6edf4;
+  --warn-ink: #7a5300;
+  --warn-soft: #fbf1d9;
+  --warn-line: #ecd59c;
+  --danger-ink: #a12a1f;
+  --danger-soft: #fdecea;
+  --danger-line: #f1b9b2;
+  --shadow: 0 1px 2px rgba(30, 28, 22, .05);
+  --radius: 10px;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --surface: #1c1f23;
+    --surface-2: #23272c;
+    --ink: #e5e4df;
+    --ink-2: #b0b4ba;
+    --ink-3: #80868e;
+    --line: #2d3238;
+    --line-strong: #3b4148;
+    --accent: #6fbfa6;
+    --accent-ink: #9ad6c2;
+    --accent-soft: #1d332c;
+    --done: #93afcb;
+    --done-soft: #222c37;
+    --warn-ink: #e6c27a;
+    --warn-soft: #2e2716;
+    --warn-line: #57471f;
+    --danger-ink: #f2a39a;
+    --danger-soft: #34201e;
+    --danger-line: #6a3029;
+    --shadow: none;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.75 var(--sans);
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, p, ul { margin: 0; }
+ul { padding: 0; list-style: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* ---- 页头 ---- */
+.masthead { padding: 40px 0 28px; border-bottom: 1px solid var(--line); }
+.eyebrow { font-size: 13px; letter-spacing: .08em; color: var(--ink-3); }
+h1 { font-size: 30px; line-height: 1.3; font-weight: 700; letter-spacing: .01em; margin: 6px 0 4px; }
+#summary { font-size: 14px; color: var(--ink-2); }
+
+main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
+.section-label { font-size: 12px; font-weight: 600; letter-spacing: .12em; color: var(--ink-3); margin-bottom: 8px; }
+
+/* ---- 提示 ---- */
+.banner { border-radius: 8px; padding: 10px 14px; font-size: 15px; border: 1px solid; }
+#index-error { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger-ink); }
+#empty-hint { background: var(--surface-2); border-color: var(--line-strong); color: var(--ink-2); }
+#empty-hint strong { color: var(--ink); }
+
+/* ---- 课程卡片 ---- */
+#courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.course-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: inherit;
+  text-decoration: none;
+}
+.course-card:hover { border-color: var(--accent); }
+.card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.course-topic { font-size: 19px; line-height: 1.4; font-weight: 700; }
+.template-tag { font-size: 12px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 0 7px; line-height: 20px; }
+.stats { display: flex; gap: 6px 16px; flex-wrap: wrap; font-size: 14px; color: var(--ink-2); }
+.stats b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.done-count { font-size: 20px; }
+.bar { position: relative; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+.bar .bar-done { background: var(--done); opacity: .45; }
+.bar .bar-mastered { background: var(--accent); }
+.resume-note {
+  font-size: 14px;
+  color: var(--ink-2);
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.resume-note .label { color: var(--ink-3); margin-right: 6px; }
+.updated { margin-top: auto; font-size: 12px; color: var(--ink-3); }
+
+/* ---- 加载失败的课 ---- */
+.load-failures { background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: var(--radius); padding: 14px 18px; color: var(--warn-ink); }
+.load-failures .section-label { color: inherit; }
+.load-failures li { font-size: 15px; padding: 3px 0; overflow-wrap: anywhere; }
+.load-failures li strong { margin-right: 6px; }
+
+@media (max-width: 560px) {
+  .wrap { padding-left: 16px; padding-right: 16px; }
+  .masthead { padding: 26px 0 20px; }
+  h1 { font-size: 24px; }
+  #courses { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">学习课程</p>
+    <h1>全部课程</h1>
+    <p id="summary"></p>
+  </div>
+</header>
+
+<main class="wrap">
+  <p class="banner" id="index-error" role="alert" hidden></p>
+  <p class="banner" id="empty-hint" hidden></p>
+  <section id="courses-section" aria-label="课程" hidden>
+    <div id="courses"></div>
+  </section>
+  <section class="load-failures" id="load-failures" aria-label="加载失败的课程" hidden>
+    <h2 class="section-label">加载失败的课程</h2>
+    <ul id="failure-list"></ul>
+  </section>
+</main>
+
+<script id="index-app">
+(function () {
+  'use strict';
+  var POLL_MS = 5000;
+  var LOAD_TIMEOUT_MS = 10000;
+  var INDEX_FILE = 'index-data.js';
+  var COURSE_FILE = 'course-data.js';
+
+  function $(id) { return document.getElementById(id); }
+  function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+  function str(v) { return typeof v === 'string' ? v : ''; }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  // ---------- 统计（与 course.html 里 CourseCore.progressOf 的口径一致） ----------
+  // 总课数不含「已跳过」；已掌握只数没有被跳过的课。
+  function progressOf(data) {
+    var lessons = Array.isArray(data.lessons) ? data.lessons : [];
+    var p = { total: 0, done: 0, mastered: 0, skipped: 0, review: Array.isArray(data.review) ? data.review.length : 0 };
+    lessons.forEach(function (l) {
+      if (!isObj(l)) return;
+      if (l.status === 'skipped') { p.skipped++; return; }
+      p.total++;
+      if (l.status === 'done') p.done++;
+      if (l.mastered === true) p.mastered++;
+    });
+    return p;
+  }
+
+  // ---------- 目录检查：只允许朴素的相对路径，在发出任何加载之前做 ----------
+  // 拒绝：不是字符串或为空、含冒号（协议、盘符）、以 / 开头、含反斜杠、含 ..、含控制字符、含空段或 . 段。
+  function isSafeDir(dir) {
+    if (typeof dir !== 'string' || dir === '') return false;
+    if (/[\u0000-\u001f\u007f:\\]/.test(dir) || dir.charAt(0) === '/' || dir.indexOf('..') >= 0) return false;
+    return dir.split('/').every(function (seg) { return seg !== '' && seg !== '.'; });
+  }
+  function dirUrl(dir) { return dir.split('/').map(encodeURIComponent).join('/'); }
+
+  // ---------- 加载 ----------
+  // 数据文件写的是同一个全局变量，所以一次只能加载一个：先清空变量，加载，读走，再清空。
+  // 结果 { status: 'ok', value } | { status: 'missing' } | { status: 'syntax' }：
+  //   missing  文件加载不到
+  //   syntax   文件加载到了，但执行出错，或者没有给变量赋一个对象
+  var scriptError = false;
+  var loadingFile = null;
+  window.addEventListener('error', function (e) {
+    // file:// 下常拿不到文件名，只给 "Script error."，所以加载期间文件名为空或指向数据文件的错都算数据文件的错
+    if (!loadingFile || e.target !== window) return;
+    if (e.filename && e.filename.indexOf(loadingFile) < 0) return;
+    scriptError = true;
+    e.preventDefault(); // 页面上已经说明了，不再刷屏控制台
+  });
+
+  function loadData(url, fileName, globalName) {
+    return new Promise(function (resolve) {
+      var s = document.createElement('script');
+      var done = false;
+      var timer = null;
+      function finish(loaded) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        s.onload = s.onerror = null;
+        s.remove();
+        var value = window[globalName];
+        window[globalName] = undefined;
+        loadingFile = null;
+        if (!loaded) resolve({ status: 'missing' });
+        else if (scriptError || !isObj(value)) resolve({ status: 'syntax' });
+        else resolve({ status: 'ok', value: value });
+      }
+      scriptError = false;
+      loadingFile = fileName;
+      window[globalName] = undefined;
+      s.onload = function () { finish(true); };
+      s.onerror = function () { finish(false); };
+      timer = setTimeout(function () { finish(false); }, LOAD_TIMEOUT_MS);
+      s.src = url + '?t=' + Date.now();
+      document.head.appendChild(s);
+    });
+  }
+
+  // 读出整份总览：{ kind: 'none' | 'error' | 'ok', cards, failures }
+  async function readAll() {
+    var idx = await loadData(INDEX_FILE, INDEX_FILE, 'LEARN_INDEX');
+    if (idx.status === 'missing') return { kind: 'none' };
+    if (idx.status === 'syntax' || !Array.isArray(idx.value.courses)) return { kind: 'error' };
+
+    var cards = [];
+    var failures = [];
+    var entries = idx.value.courses;
+    for (var i = 0; i < entries.length; i++) {
+      var entry = isObj(entries[i]) ? entries[i] : {};
+      var dir = entry.dir;
+      var slug = str(entry.slug);
+      var name = slug || (typeof dir === 'string' ? dir : '') || '（未命名）';
+      if (!isSafeDir(dir)) { failures.push({ name: name, reason: 'unsafe', dir: typeof dir === 'string' ? dir : '' }); continue; }
+      var r = await loadData(dirUrl(dir) + '/' + COURSE_FILE, COURSE_FILE, 'LEARN_COURSE');
+      if (r.status === 'ok' && !Array.isArray(r.value.lessons)) r = { status: 'syntax' };
+      if (r.status !== 'ok') { failures.push({ name: name, reason: r.status, dir: dir }); continue; }
+      var d = r.value;
+      var p = progressOf(d);
+      var t = str(d.updatedAt) ? Date.parse(d.updatedAt) : NaN;
+      cards.push({
+        slug: slug || str(d.slug) || dir,
+        href: dirUrl(dir) + '/course.html',
+        topic: str(d.topic) || slug || dir,
+        template: str(d.template),
+        done: p.done, total: p.total, mastered: p.mastered, review: p.review,
+        note: isObj(d.resume) ? str(d.resume.note).trim() : '',
+        time: isNaN(t) ? null : t
+      });
+    }
+    // 更新时间倒序（按时刻比较，不看时区写法）；没有更新时间的排最后，其余保持登记顺序
+    cards.sort(function (a, b) {
+      var x = a.time === null ? -Infinity : a.time;
+      var y = b.time === null ? -Infinity : b.time;
+      return x === y ? 0 : y > x ? 1 : -1;
+    });
+    return { kind: 'ok', cards: cards, failures: failures };
+  }
+
+  // ---------- 渲染 ----------
+  var FAILURE_TEXT = {
+    missing: function (f) { return '找不到 ' + f.dir + '/' + COURSE_FILE + '，课程目录可能被移走或删除了。'; },
+    syntax: function (f) { return f.dir + '/' + COURSE_FILE + ' 读不出课程数据：可能有语法错误、正在写入，或者里面不是一门课程。'; },
+    unsafe: function () { return '课程目录必须是相对路径，不能带协议、以 / 开头，也不能含 .. 或反斜杠；已跳过，没有读取。'; }
+  };
+
+  function barOf(done, mastered, total) {
+    var bar = el('div', 'bar');
+    var a = el('i', 'bar-done');
+    var m = el('i', 'bar-mastered');
+    a.style.width = (total ? Math.min(100, done / total * 100) : 0) + '%';
+    m.style.width = (total ? Math.min(100, mastered / total * 100) : 0) + '%';
+    bar.append(a, m);
+    return bar;
+  }
+  function stat(label, cls, value) {
+    var s = el('span');
+    s.append(label + ' ', el('b', cls, value));
+    return s;
+  }
+
+  function renderCard(c) {
+    var a = el('a', 'course-card');
+    a.dataset.slug = c.slug;
+    a.setAttribute('href', c.href);
+    var head = el('div', 'card-head');
+    head.appendChild(el('h2', 'course-topic', c.topic));
+    if (c.template) head.appendChild(el('span', 'template-tag', c.template));
+    var stats = el('div', 'stats');
+    stats.append(stat('已讲', 'done-count', c.done + '/' + c.total), stat('已掌握', 'mastered-count', String(c.mastered)), stat('待回顾', 'review-count', String(c.review)));
+    a.append(head, stats, barOf(c.done, c.mastered, c.total));
+    if (c.note) {
+      var n = el('p', 'resume-note');
+      n.append(el('span', 'label', '断点'), c.note);
+      a.appendChild(n);
+    }
+    if (c.time !== null) {
+      a.appendChild(el('p', 'updated', '更新于 ' + new Date(c.time).toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+    }
+    return a;
+  }
+
+  function renderFailure(f) {
+    var li = el('li');
+    li.dataset.reason = f.reason;
+    li.append(el('strong', '', f.name), FAILURE_TEXT[f.reason](f));
+    return li;
+  }
+
+  function showHint(kind) {
+    var hint = $('empty-hint');
+    hint.hidden = !kind;
+    if (!kind) return;
+    hint.textContent = '';
+    hint.append(el('strong', '', kind === 'none' ? '还没有 index-data.js。' : '还没有登记任何课程。'),
+      '回到 Claude Code，说「我想学……」开一门课；课程登记后几秒内会出现在这里。');
+  }
+
+  function render(model) {
+    var cards = model.cards || [];
+    var failures = model.failures || [];
+    var list = $('courses');
+    list.textContent = '';
+    cards.forEach(function (c) { list.appendChild(renderCard(c)); });
+    $('courses-section').hidden = cards.length === 0;
+    var fl = $('failure-list');
+    fl.textContent = '';
+    failures.forEach(function (f) { fl.appendChild(renderFailure(f)); });
+    $('load-failures').hidden = failures.length === 0;
+    showHint(cards.length + failures.length === 0 ? model.kind === 'none' ? 'none' : 'empty' : null);
+    $('summary').textContent = cards.length ? '共 ' + cards.length + ' 门课' + (failures.length ? '，另有 ' + failures.length + ' 门读取失败' : '') : '';
+  }
+
+  // ---------- 轮询 ----------
+  var state = { fp: null, loading: false };
+
+  function setIndexError(msg) {
+    var box = $('index-error');
+    box.hidden = !msg;
+    box.textContent = msg || '';
+  }
+
+  async function refresh() {
+    if (state.loading) return;
+    state.loading = true;
+    try {
+      var model = await readAll();
+      if (model.kind === 'error') {
+        // 保留上一次成功显示的内容；一次都没成功过时，页面上只有这条错误
+        setIndexError(INDEX_FILE + ' 读不出来（可能有语法错误，或正在写入）。已显示的内容保持不变，改好后会自动恢复。');
+        if (state.fp === null) { showHint(null); }
+        return;
+      }
+      setIndexError('');
+      var fp = JSON.stringify(model);
+      if (fp !== state.fp) {
+        state.fp = fp;
+        render(model);
+      }
+    } catch (e) {
+      setIndexError('总览页出错：' + (e && e.message ? e.message : e));
+    } finally {
+      state.loading = false;
+    }
+  }
+
+  refresh();
+  setInterval(refresh, POLL_MS);
+})();
+</script>
+</body>
+</html>
