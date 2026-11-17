@@ -132,3 +132,28 @@ test('lessons 损坏时 validateCourse 不抛异常，只报错、不算版面�
     assert.ok(r.errors.length > 0, name);
   }
 });
+
+test('同行或同列隔着别的节点时，连线绕开中间的节点', () => {
+  const p = {
+    kind: 'diagram', title: 't',
+    nodes: [
+      { id: 'a', label: 'A', col: 1, row: 2, since: 'l1' },
+      { id: 'm', label: 'M', col: 2, row: 2, since: 'l1' },
+      { id: 'b', label: 'B', col: 3, row: 2, since: 'l1' },
+      { id: 'v', label: 'V', col: 1, row: 3, since: 'l1' },
+      { id: 'w', label: 'W', col: 1, row: 4, since: 'l1' },
+    ],
+    edges: [{ from: 'a', to: 'b', since: 'l1' }, { from: 'a', to: 'w', since: 'l1' }, { from: 'a', to: 'm', since: 'l1' }],
+  };
+  const s = at('l1', p);
+  const crosses = (pts, r) => pts.slice(1).some((q, i) => {
+    const o = pts[i];
+    const x1 = Math.min(o.x, q.x), x2 = Math.max(o.x, q.x), y1 = Math.min(o.y, q.y), y2 = Math.max(o.y, q.y);
+    return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
+  });
+  const [ab, aw, am] = s.edges;
+  assert.equal(crosses(ab.points, node(s, 'm')), false, 'a→b 不应穿过 m');
+  assert.equal(crosses(aw.points, node(s, 'v')), false, 'a→w 不应穿过 v');
+  assert.equal(am.points.length, 2, '相邻的两个节点仍走直线');
+  for (const e of s.edges) for (const pt of e.points) assert.ok(pt.x >= 0 && pt.y >= 0 && pt.x <= s.width && pt.y <= s.height);
+});

@@ -211,6 +211,97 @@ li[data-status="skipped"] .l-title { text-decoration: line-through; text-decorat
 #growth-panels:empty { display: none; }
 #added:empty { display: none; }
 
+/* ---- 生长面板 ---- */
+.growth-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.growth-head .section-label { margin-bottom: 0; }
+#play { display: inline-flex; align-items: center; gap: 6px; }
+#play::before { content: ""; width: 0; height: 0; border-left: 8px solid currentColor; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+#play[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent); }
+#play[aria-pressed="true"]::before { width: 8px; height: 8px; border: 0; background: currentColor; border-radius: 1px; }
+#growth-panels { display: grid; gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; overflow: hidden; }
+.panel-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.panel-title { font-size: 15px; font-weight: 650; }
+.panel-kind { font-size: 12px; color: var(--ink-3); }
+.panel-actions { margin-left: auto; display: flex; gap: 6px; }
+.panel-actions .btn { font-size: 13px; padding: 1px 10px; }
+.panel-empty { padding: 18px 16px; color: var(--ink-3); font-size: 14px; }
+
+/* 图：画布按自然大小显示，放不下时先缩小到 72%，再小就在面板里横向滚动 */
+.diagram-scroll { overflow-x: auto; padding: 8px 8px 4px; }
+.diagram-stage { position: relative; margin: 0 auto; }
+.diagram-stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.diagram { font-family: var(--sans); }
+.diagram .d-group rect { fill: var(--surface-2); fill-opacity: .55; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.diagram .d-group text { fill: var(--ink-3); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.diagram .node rect.shape { stroke-width: 1.25; }
+.diagram .node text { font-size: 14px; font-weight: 550; fill: var(--ink); }
+.diagram .node[data-style="box"] rect.shape { fill: var(--surface-2); stroke: var(--line-strong); }
+.diagram .node[data-style="pill"] rect.shape { fill: var(--accent-soft); stroke: var(--accent); }
+.diagram .node[data-style="pill"] text { fill: var(--accent-ink); }
+.diagram .node[data-style="outline"] rect.shape { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.75; }
+.diagram .node[data-style="ghost"] rect.shape { fill: none; stroke: var(--ink-3); stroke-dasharray: 5 4; }
+.diagram .node[data-style="ghost"] text { fill: var(--ink-3); font-weight: 400; font-style: italic; }
+.diagram .node .halo { fill: none; stroke: var(--accent); stroke-opacity: .28; stroke-width: 5; }
+.diagram .node.is-new rect.shape { stroke: var(--accent); stroke-width: 2; }
+.diagram .edge path { fill: none; stroke: var(--ink-3); stroke-width: 1.5; stroke-linejoin: round; }
+.diagram .edge[data-style="dashed"] path { stroke-dasharray: 6 5; }
+.diagram .edge.is-new path { stroke: var(--accent); }
+.diagram .arrow { fill: var(--ink-3); }
+.diagram .arrow-new { fill: var(--accent); }
+.diagram .edge text { font-size: 12px; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.diagram .d-annot { font-size: 12px; fill: var(--ink-2); }
+.diagram .d-annot.is-new { fill: var(--accent-ink); }
+.diagram .d-route circle, .diagram .d-route rect { fill: var(--accent); }
+.diagram .d-route text { fill: var(--surface); font-size: 11px; font-weight: 700; }
+.route-num {
+  position: absolute; transform: translate(-50%, -50%);
+  min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+  background: var(--accent); color: var(--surface); box-shadow: 0 0 0 2px var(--surface);
+  font: 700 11px/20px var(--sans); text-align: center; font-variant-numeric: tabular-nums; white-space: nowrap;
+  pointer-events: none;
+}
+.diagram .is-new, .route-num { animation: grow-in .45s ease-out both; }
+.diagram .is-new { transform-box: fill-box; transform-origin: center; }
+@keyframes grow-in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+.route-num { animation-name: route-in; }
+@keyframes route-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 代码 */
+.version-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px 0; }
+.version-chip { font-size: 13px; line-height: 20px; padding: 1px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: none; color: var(--ink-2); cursor: pointer; }
+.version-chip:hover { border-color: var(--ink-3); color: var(--ink); }
+.version-chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.version-note { padding: 6px 16px 0; font-size: 14px; color: var(--ink-2); }
+.code-view { margin: 10px 16px 14px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; font-family: var(--mono); font-size: 13.5px; line-height: 1.6; padding: 8px 0; position: relative; }
+.code-view .code-lang { top: 4px; }
+.code-line { display: grid; grid-template-columns: 3em max-content; white-space: pre; tab-size: 2; min-width: max-content; padding-right: 14px; border-left: 3px solid transparent; }
+.code-line::before { content: attr(data-n); color: var(--ink-3); text-align: right; padding-right: 1em; user-select: none; }
+.code-line.changed { background: var(--accent-soft); border-left-color: var(--accent); }
+.diff-hint { font-size: 12px; color: var(--ink-3); padding: 0 16px 12px; margin-top: -6px; }
+
+/* 时间线 */
+.timeline { padding: 12px 16px 14px; display: grid; gap: 0; }
+.tl-meta { font-size: 13px; color: var(--ink-3); padding: 10px 16px 0; }
+.event { position: relative; padding: 0 0 14px 22px; }
+.event:last-child { padding-bottom: 0; }
+.event::before { content: ""; position: absolute; left: 4px; top: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink-3); }
+.event::after { content: ""; position: absolute; left: 8px; top: 21px; bottom: -4px; width: 1px; background: var(--line-strong); }
+.event:last-child::after { display: none; }
+.event.is-new::before { border-color: var(--accent); background: var(--accent); }
+.ev-title { font-weight: 600; font-size: 15px; }
+.ev-detail { color: var(--ink-2); font-size: 14px; }
+.ev-metric { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 4px; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tl-track { height: 10px; border-radius: 5px; background: var(--surface-2); position: relative; overflow: hidden; }
+.tl-track .bar { position: absolute; left: 0; top: 0; bottom: 0; height: auto; margin: 0; border-radius: 5px; background: var(--ink-3); }
+.event.better .tl-track .bar { background: var(--accent); }
+.ev-metric .tag { margin-left: 6px; }
+
+/* 本课新增 */
+#added { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; }
+#added .added-label { color: var(--ink-3); margin-right: 2px; }
+#added .chip { padding: 1px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); border: 1px solid transparent; }
+
 #cards { display: grid; gap: 16px; }
 .empty-lesson { color: var(--ink-3); padding: 28px 0; text-align: center; border: 1px dashed var(--line-strong); border-radius: var(--radius); }
 
@@ -320,6 +411,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
 }
 @media (prefers-reduced-motion: reduce) {
   #toast { transition: none; }
+  .diagram .is-new, .route-num { animation: none; }
 }
 </style>
 </head>
@@ -380,9 +472,12 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       </div>
     </div>
 
-    <!-- 生长面板：任务 6 往 #growth-panels 里画面板，往 #added 里放「本课新增」 -->
+    <!-- 生长面板：course-app 的「生长面板」一节往 #growth-panels 里画面板，往 #added 里放「本课新增」 -->
     <section id="growth" hidden>
-      <h2 class="section-label">生长</h2>
+      <div class="growth-head">
+        <h2 class="section-label">生长</h2>
+        <button class="btn" id="play" type="button" aria-pressed="false">播放生长</button>
+      </div>
       <div id="growth-panels"></div>
       <div id="added"></div>
     </section>
@@ -829,6 +924,37 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     return [{ x: acx, y: y1 }, { x: acx, y: ym }, { x: bcx, y: ym }, { x: bcx, y: y2 }];
   }
 
+  function segmentHits(p, q, r) {
+    var x1 = Math.min(p.x, q.x), x2 = Math.max(p.x, q.x), y1 = Math.min(p.y, q.y), y2 = Math.max(p.y, q.y);
+    return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
+  }
+  function pathHits(points, blockers) {
+    for (var i = 1; i < points.length; i++) {
+      for (var k = 0; k < blockers.length; k++) if (segmentHits(points[i - 1], points[i], blockers[k])) return true;
+    }
+    return false;
+  }
+
+  // 直线穿过了别的节点时换一条：同行的从上方（第一行从下方）的行间空隙绕过去，同列的从右侧的列间空隙绕过去。
+  // 绕行路线本身也被挡住时保留直线
+  function routeEdge(a, b, blockers) {
+    var pts = edgePoints(a, b);
+    if (pts.length !== 2 || !pathHits(pts, blockers)) return pts;
+    var g = core.GRID, alt;
+    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2;
+    if (pts[0].y === pts[1].y) {
+      var up = a.y - MARGIN >= (g.rowH - g.nodeH) / 2;
+      var gy = up ? Math.min(a.y, b.y) - (g.rowH - g.nodeH) / 2 : Math.max(a.y + a.h, b.y + b.h) + (g.rowH - g.nodeH) / 2;
+      var ay = up ? a.y : a.y + a.h, by = up ? b.y : b.y + b.h;
+      alt = [{ x: acx, y: ay }, { x: acx, y: gy }, { x: bcx, y: gy }, { x: bcx, y: by }];
+    } else {
+      var gx = Math.max(a.x + a.w, b.x + b.w) + (g.colW - g.nodeW) / 2;
+      var aY = a.y + a.h / 2, bY = b.y + b.h / 2;
+      alt = [{ x: a.x + a.w, y: aY }, { x: gx, y: aY }, { x: gx, y: bY }, { x: b.x + b.w, y: bY }];
+    }
+    return pathHits(alt, blockers) ? pts : alt;
+  }
+
   // 画布大小按面板里所有节点算，不随课程变化，逐课播放时图不会缩放跳动
   function canvasSize(panel) {
     var right = 0, bottom = 0, annots = Object.create(null);
@@ -900,9 +1026,10 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     });
 
     var edges = list(panel.edges).filter(function (e) { return seen(e) && rects[e.from] && rects[e.to]; }).map(function (e) {
+      var blockers = nodes.filter(function (n) { return n.id !== e.from && n.id !== e.to; });
       return {
         from: e.from, to: e.to, label: e.label || '', style: e.style || 'solid',
-        points: edgePoints(rects[e.from], rects[e.to]), isNew: fresh(e)
+        points: routeEdge(rects[e.from], rects[e.to], blockers), isNew: fresh(e)
       };
     });
 
@@ -1460,12 +1587,362 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     $('resources-section').hidden = !res.firstChild;
   }
 
-  // ---------- 当前课 ----------
-  // 生长面板的接缝：收到课程和正在看的课，画进 #growth。
-  // 本任务只负责显隐：没有面板时隐藏；任务 6 在这里往 #growth-panels 画面板、往 #added 放「本课新增」。
+  // ---------- 生长面板：图、代码、时间线、本课新增、播放生长、导出 ----------
+  // 数据都来自 CourseCore 的 diagramAt / codeStateAt / timelineAt / addedAt，这里只管画。
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var PLAY_MS = 1800;
+  var PANEL_KIND_TEXT = { diagram: '图', code: '代码演进', timeline: '时间线' };
+  var codeChoice = Object.create(null); // 面板序号 -> { lesson, version }：学习者在这一课手动选的版本
+  var diagramSeq = 0;                   // 每张图的箭头 marker 用不同的 id
+  var playTimer = null;
+
+  // 画进 #growth：没有面板时隐藏整块
   function renderGrowth(course, lessonId) {
-    $('growth').hidden = arr(course.growth).length === 0;
+    var panels = arr(course.growth);
+    $('growth').hidden = panels.length === 0;
+    var host = $('growth-panels');
+    clear(host);
+    renderAdded(course, lessonId);
+    if (!panels.length || lessonId === null) return;
+    var lessons = lessonsOf(course);
+    panels.forEach(function (p, i) {
+      var box = el('section', 'panel');
+      host.appendChild(box);
+      var kind = isObj(p) && PANEL_KIND_TEXT[p.kind] ? p.kind : 'unknown';
+      box.dataset.panel = kind;
+      fillPanel(box, function () {
+        if (kind === 'diagram') renderDiagramPanel(box, course, p, lessons, lessonId);
+        else if (kind === 'code') renderCodePanel(box, p, i, lessons, lessonId);
+        else if (kind === 'timeline') renderTimelinePanel(box, p, lessons, lessonId);
+        else throw new Error('不认识的面板类型 ' + String(isObj(p) ? p.kind : p));
+      }, isObj(p) ? str(p.title) : '');
+    });
   }
+
+  // 单个面板出错只影响这一个
+  function fillPanel(box, draw, title) {
+    clear(box);
+    try { draw(); } catch (e) {
+      clear(box);
+      box.appendChild(panelHead(title || '面板', ''));
+      box.appendChild(el('p', 'panel-empty', '这个面板显示不了：' + e.message));
+    }
+  }
+
+  function panelHead(title, kind) {
+    var head = el('header', 'panel-head');
+    head.appendChild(el('h3', 'panel-title', title));
+    if (kind) head.appendChild(el('span', 'panel-kind', PANEL_KIND_TEXT[kind]));
+    return head;
+  }
+
+  function renderAdded(course, lessonId) {
+    var box = $('added');
+    clear(box);
+    var names = lessonId === null ? [] : C.addedAt(course, lessonId);
+    if (!names.length) return;
+    box.appendChild(el('span', 'added-label', '本课新增'));
+    names.forEach(function (n) { box.appendChild(el('span', 'chip', n)); });
+  }
+
+  // ---- 图 ----
+  function svgEl(tagName, attrs, cls) {
+    var e = document.createElementNS(SVG_NS, tagName);
+    if (cls) e.setAttribute('class', cls);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+  function svgText(attrs, cls, text) {
+    var t = svgEl('text', attrs, cls);
+    t.textContent = text;
+    return t;
+  }
+  // 标签太长时缩小字号：汉字按 1em、其他字符按 0.6em 估宽
+  function labelFontSize(label, w) {
+    var wide = label.replace(/[\u0000-ÿ]/g, '').length;
+    var em = wide + (label.length - wide) * 0.6;
+    return Math.max(10, Math.min(14, (w - 16) / Math.max(em, 1)));
+  }
+  function pathData(points) {
+    return points.map(function (p, i) { return (i ? 'L' : 'M') + p.x + ' ' + p.y; }).join(' ');
+  }
+  function routeText(step) { return step.numbers.join('·'); }
+
+  function drawDiagram(s) {
+    var uid = 'd' + (++diagramSeq);
+    var svg = svgEl('svg', { viewBox: '0 0 ' + s.width + ' ' + s.height, width: s.width, height: s.height, role: 'img' }, 'diagram');
+    var defs = svg.appendChild(svgEl('defs'));
+    [['', 'arrow'], ['-new', 'arrow-new']].forEach(function (m) {
+      var marker = svgEl('marker', {
+        id: uid + '-arrow' + m[0], viewBox: '0 0 10 10', refX: 9, refY: 5,
+        markerWidth: 9, markerHeight: 9, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse'
+      });
+      marker.appendChild(svgEl('path', { d: 'M0 0 L10 5 L0 10 z' }, m[1]));
+      defs.appendChild(marker);
+    });
+
+    s.groups.forEach(function (g) {
+      var gEl = svg.appendChild(svgEl('g', {}, 'd-group' + (g.isNew ? ' is-new' : '')));
+      gEl.appendChild(svgEl('rect', { x: g.x, y: g.y, width: g.w, height: g.h, rx: 10 }));
+      gEl.appendChild(svgText({ x: g.x + 10, y: g.y + 15 }, '', g.label));
+    });
+
+    // 先画所有连线，再画连线标签，标签不会被别的线压住
+    var labels = [];
+    s.edges.forEach(function (e) {
+      var gEl = svg.appendChild(svgEl('g', {}, 'edge' + (e.isNew ? ' is-new' : '')));
+      gEl.setAttribute('data-style', e.style);
+      gEl.setAttribute('data-from', e.from);
+      gEl.setAttribute('data-to', e.to);
+      gEl.appendChild(svgEl('path', { d: pathData(e.points), 'marker-end': 'url(#' + uid + '-arrow' + (e.isNew ? '-new' : '') + ')' }));
+      if (e.label) labels.push({ edge: e, g: gEl });
+    });
+    labels.forEach(function (x) {
+      var pts = x.edge.points, k = Math.floor((pts.length - 2) / 2);
+      var a = pts[k], b = pts[k + 1];
+      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      // 水平段的标签放在线上方；从起点往下绕的线放在下方，离开节点和标注
+      var below = a.y === b.y && a.y > pts[0].y;
+      var attrs = a.y === b.y ? { x: mx, y: below ? my + 16 : my - 6, 'text-anchor': 'middle' } : { x: mx + 6, y: my + 4, 'text-anchor': 'start' };
+      x.g.appendChild(svgText(attrs, '', x.edge.label));
+    });
+
+    s.nodes.forEach(function (n) {
+      var gEl = svg.appendChild(svgEl('g', {}, 'node' + (n.isNew ? ' is-new' : '')));
+      gEl.setAttribute('data-node-id', n.id);
+      gEl.setAttribute('data-style', n.style);
+      var rx = n.style === 'pill' ? n.h / 2 : n.style === 'outline' ? 2 : 7;
+      if (n.isNew) gEl.appendChild(svgEl('rect', { x: n.x - 3, y: n.y - 3, width: n.w + 6, height: n.h + 6, rx: rx + 3 }, 'halo'));
+      gEl.appendChild(svgEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: rx }, 'shape'));
+      var t = svgText({ x: n.x + n.w / 2, y: n.y + n.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', n.label);
+      t.style.fontSize = labelFontSize(n.label, n.w).toFixed(1) + 'px';
+      gEl.appendChild(t);
+      gEl.appendChild(svgEl('title')).textContent = n.label;
+    });
+
+    s.annotations.forEach(function (a) {
+      svg.appendChild(svgText({ x: a.x, y: a.y + 12 }, 'd-annot' + (a.isNew ? ' is-new' : ''), a.text));
+    });
+    return svg;
+  }
+
+  // 路线编号在页面上是叠在图上的 HTML，按画布的百分比定位，图缩放时跟着走
+  function nodeById(s, id) {
+    for (var i = 0; i < s.nodes.length; i++) if (s.nodes[i].id === id) return s.nodes[i];
+    return null;
+  }
+  function routeOverlay(stage, s) {
+    if (!s.route) return;
+    s.route.steps.forEach(function (st) {
+      var n = nodeById(s, st.node);
+      if (!n) return;
+      var badge = el('span', 'route-num', routeText(st));
+      badge.style.left = (n.x / s.width * 100) + '%';
+      badge.style.top = (n.y / s.height * 100) + '%';
+      badge.title = '路线第 ' + st.numbers.join('、') + ' 步';
+      stage.appendChild(badge);
+    });
+  }
+
+  function renderDiagramPanel(box, course, p, lessons, lessonId) {
+    var s = C.diagramAt(p, lessons, lessonId);
+    var head = panelHead(str(p.title), 'diagram');
+    box.appendChild(head);
+    if (!s.nodes.length) {
+      box.appendChild(el('p', 'panel-empty', '这张图从后面的课开始出现。'));
+      return;
+    }
+    var actions = head.appendChild(el('div', 'panel-actions'));
+    [['svg', '导出 SVG'], ['png', '导出 PNG']].forEach(function (x) {
+      var b = actions.appendChild(el('button', 'btn', x[1]));
+      b.type = 'button';
+      b.dataset.export = x[0];
+    });
+    var scroll = box.appendChild(el('div', 'diagram-scroll'));
+    var stage = scroll.appendChild(el('div', 'diagram-stage'));
+    // 自然大小封顶；窄屏最多缩到 72%，再小就在面板里横向滚动，字不会小到看不清
+    stage.style.maxWidth = s.width + 'px';
+    stage.style.minWidth = Math.round(s.width * 0.72) + 'px';
+    var svg = stage.appendChild(drawDiagram(s));
+    svg.setAttribute('aria-label', str(p.title));
+    routeOverlay(stage, s);
+
+    actions.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-export]');
+      if (!b) return;
+      var name = exportName(course, p);
+      var text = standaloneSvg(svg, s);
+      if (b.dataset.export === 'svg') download(new Blob([text], { type: 'image/svg+xml' }), name + '.svg');
+      else exportPng(text, s, name + '.png');
+    });
+  }
+
+  // ---- 导出 ----
+  // 页面上的颜色来自 CSS 变量；导出时把每个元素算好的样式写成属性，文件离开页面也能正常显示
+  var INLINE_PROPS = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'stroke-linejoin',
+    'paint-order', 'font-family', 'font-size', 'font-weight', 'font-style', 'letter-spacing'];
+  function standaloneSvg(svg, s) {
+    var clone = svg.cloneNode(true);
+    var src = [svg].concat(Array.prototype.slice.call(svg.querySelectorAll('*')));
+    var dst = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
+    // 只写与父元素不同的值，其余靠继承；marker 里的内容同样从 marker 的祖先继承
+    src.forEach(function (node, i) {
+      var cs = getComputedStyle(node), d = dst[i];
+      var parent = i === 0 ? null : getComputedStyle(node.parentNode);
+      INLINE_PROPS.forEach(function (prop) {
+        var v = cs.getPropertyValue(prop);
+        if (!v || (parent && parent.getPropertyValue(prop) === v)) return;
+        if (prop === 'stroke-width' || prop === 'stroke-dasharray') v = v.replace(/px/g, '');
+        d.setAttribute(prop, v);
+      });
+      d.removeAttribute('class');
+      d.removeAttribute('style');
+    });
+    var rootCss = getComputedStyle(document.documentElement);
+    var color = function (name) { return rootCss.getPropertyValue(name).trim(); };
+    clone.insertBefore(svgEl('rect', { x: 0, y: 0, width: s.width, height: s.height, fill: color('--surface') }), clone.firstChild);
+    // 路线编号在页面上是 HTML，导出时画成 SVG
+    if (s.route) {
+      s.route.steps.forEach(function (st) {
+        var n = nodeById(s, st.node);
+        if (!n) return;
+        var text = routeText(st);
+        var w = Math.max(20, 10 + text.length * 7);
+        var g = clone.appendChild(svgEl('g'));
+        g.appendChild(svgEl('rect', { x: n.x - w / 2, y: n.y - 10, width: w, height: 20, rx: 10, fill: color('--accent'), stroke: color('--surface'), 'stroke-width': 2 }));
+        g.appendChild(svgText({ x: n.x, y: n.y, dy: '0.35em', 'text-anchor': 'middle', fill: color('--surface'),
+          'font-size': '11px', 'font-weight': 700, 'font-family': getComputedStyle(svg).fontFamily }, '', text));
+      });
+    }
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(clone);
+  }
+
+  function exportName(course, p) {
+    return (str(course.slug) + '-' + str(p.title)).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_');
+  }
+
+  function download(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // PNG 按 2 倍分辨率画：SVG 用 data: 地址载入图片，不产生网络请求，也不会污染画布
+  function exportPng(svgText, s, name) {
+    var img = new Image();
+    img.onload = function () {
+      var canvas = document.createElement('canvas');
+      canvas.width = s.width * 2;
+      canvas.height = s.height * 2;
+      var ctx = canvas.getContext('2d');
+      ctx.scale(2, 2);
+      ctx.drawImage(img, 0, 0, s.width, s.height);
+      canvas.toBlob(function (blob) {
+        if (blob) download(blob, name);
+        else toast('导出 PNG 失败');
+      }, 'image/png');
+    };
+    img.onerror = function () { toast('导出 PNG 失败'); };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+  }
+
+  // ---- 代码 ----
+  function renderCodePanel(box, p, idx, lessons, lessonId) {
+    var choice = codeChoice[idx];
+    var s = C.codeStateAt(p, lessons, lessonId, choice && choice.lesson === lessonId ? choice.version : undefined);
+    box.appendChild(panelHead(str(p.title), 'code'));
+    if (!s.current) {
+      box.appendChild(el('p', 'panel-empty', '这段代码从后面的课开始出现。'));
+      return;
+    }
+    var bar = box.appendChild(el('div', 'version-bar'));
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', '版本');
+    var pos = 0;
+    s.versions.forEach(function (v, i) {
+      var chip = bar.appendChild(el('button', 'version-chip', v.label));
+      chip.type = 'button';
+      chip.dataset.version = v.id;
+      chip.setAttribute('aria-pressed', v.id === s.current.id ? 'true' : 'false');
+      if (v.id === s.current.id) pos = i;
+    });
+    bar.addEventListener('click', function (e) {
+      var chip = e.target.closest('.version-chip');
+      if (!chip) return;
+      codeChoice[idx] = { lesson: lessonId, version: chip.dataset.version };
+      fillPanel(box, function () { renderCodePanel(box, p, idx, lessons, lessonId); }, str(p.title));
+    });
+    if (s.current.note) box.appendChild(rich('p', 'version-note', s.current.note));
+    var view = box.appendChild(el('div', 'code-view'));
+    if (s.current.language) view.appendChild(el('span', 'code-lang', s.current.language));
+    s.current.lines.forEach(function (l, i) {
+      var line = view.appendChild(el('div', 'code-line' + (l.changed ? ' changed' : '')));
+      line.dataset.n = String(i + 1);
+      line.appendChild(el('span', '', l.text));
+    });
+    if (pos > 0) box.appendChild(el('p', 'diff-hint', '高亮的行是相对上一版「' + s.versions[pos - 1].label + '」新增或改动的'));
+  }
+
+  // ---- 时间线 ----
+  function renderTimelinePanel(box, p, lessons, lessonId) {
+    var s = C.timelineAt(p, lessons, lessonId);
+    box.appendChild(panelHead(str(p.title), 'timeline'));
+    if (!s.events.length) {
+      box.appendChild(el('p', 'panel-empty', '时间线从后面的课开始。'));
+      return;
+    }
+    if (s.events.some(function (e) { return e.ratio !== null; })) {
+      box.appendChild(el('p', 'tl-meta', (str(p.metricLabel) || '指标') + '，' + (p.better === 'higher' ? '越高越好' : '越低越好')));
+    }
+    var list = box.appendChild(el('ol', 'timeline'));
+    s.events.forEach(function (e) {
+      var li = list.appendChild(el('li', 'event' + (e.isNew ? ' is-new' : '') + (e.better ? ' better' : '')));
+      li.appendChild(rich('div', 'ev-title', e.title));
+      if (e.detail) li.appendChild(rich('div', 'ev-detail', e.detail));
+      if (e.ratio === null) return;
+      var row = li.appendChild(el('div', 'ev-metric'));
+      var track = row.appendChild(el('div', 'tl-track'));
+      track.appendChild(el('i', 'bar')).style.width = (e.ratio * 100) + '%';
+      var value = row.appendChild(el('span', '', e.metricText));
+      if (e.better) value.appendChild(tag('tag-ok', '优于起点'));
+    });
+  }
+
+  // ---- 播放生长 ----
+  // 每 1800 毫秒前进一课；到最后一课、学习者手动选课或按方向键时停止
+  function setPlaying(on) {
+    var b = $('play');
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.textContent = on ? '停止播放' : '播放生长';
+  }
+  function stopPlay() {
+    if (playTimer !== null) { clearInterval(playTimer); playTimer = null; }
+    setPlaying(false);
+  }
+  function startPlay() {
+    if (!state.shown) return;
+    var ls = lessonsOf(state.shown);
+    if (ls.length < 2) return;
+    if (lessonIndex(state.shown, state.viewId) >= ls.length - 1) show(ls[0].id, true);
+    setPlaying(true);
+    playTimer = setInterval(function () {
+      var all = lessonsOf(state.shown), i = lessonIndex(state.shown, state.viewId);
+      if (i < 0 || i >= all.length - 1) { stopPlay(); return; }
+      show(all[i + 1].id, false);
+      if (i + 1 >= all.length - 1) stopPlay();
+    }, PLAY_MS);
+  }
+  $('play').addEventListener('click', function () {
+    if (playTimer !== null) stopPlay();
+    else startPlay();
+  });
+
+  // ---------- 当前课 ----------
 
   function renderLesson(d) {
     var ls = lessonsOf(d);
@@ -1565,23 +2042,24 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     if (i >= 0 && i < ls.length) show(ls[i].id, true);
   }
 
+  // 学习者自己选课、按方向键时，自动播放停下
   $('lessons').addEventListener('click', function (e) {
     var li = e.target.closest('li[data-lesson-id]');
-    if (li) show(li.dataset.lessonId, true);
+    if (li) { stopPlay(); show(li.dataset.lessonId, true); }
   });
   $('review').addEventListener('click', function (e) {
     var b = e.target.closest('[data-goto]');
-    if (b) show(b.dataset.goto, true);
+    if (b) { stopPlay(); show(b.dataset.goto, true); }
   });
-  $('prev').addEventListener('click', function () { step(-1); });
-  $('next').addEventListener('click', function () { step(1); });
-  $('to-resume').addEventListener('click', function () { if (state.shown) show(resumeOf(state.shown), true); });
+  $('prev').addEventListener('click', function () { stopPlay(); step(-1); });
+  $('next').addEventListener('click', function () { stopPlay(); step(1); });
+  $('to-resume').addEventListener('click', function () { stopPlay(); if (state.shown) show(resumeOf(state.shown), true); });
   document.addEventListener('keydown', function (e) {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.defaultPrevented) return;
     var t = e.target;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); stopPlay(); step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); stopPlay(); step(1); }
   });
 
   var toastTimer = null;
