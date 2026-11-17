@@ -2,21 +2,9 @@
 // 用法：node validate.mjs <course-data.js>
 // 校验逻辑只有一份，在 course.html 的 <script id="course-core"> 里，这里把它抽出来运行。
 // 退出码：0 通过（可以有警告），1 数据有错误或读不了，2 参数不对。
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import vm from 'node:vm';
-import { fileURLToPath } from 'node:url';
+import { loadCourseCore } from './lib/core-loader.mjs';
 import { DataFileError, readDataFile } from './lib/data-file.mjs';
-
-const HTML = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets/course.html');
-
-function loadCore() {
-  const m = readFileSync(HTML, 'utf8').match(/<script id="course-core">([\s\S]*?)<\/script>/);
-  if (!m) throw new Error(`${HTML} 里找不到 <script id="course-core">`);
-  const sandbox = { window: {} };
-  vm.runInNewContext(m[1], sandbox);
-  return sandbox.window.CourseCore;
-}
 
 const args = process.argv.slice(2);
 if (args.length !== 1) {
@@ -34,7 +22,7 @@ try {
   process.exit(1);
 }
 
-const { errors, warnings } = loadCore().validateCourse(data, { dirName: path.basename(path.dirname(file)) });
+const { errors, warnings } = loadCourseCore().validateCourse(data, { dirName: path.basename(path.dirname(file)) });
 for (const e of errors) console.log(`✗ ${e}`);
 for (const w of warnings) console.log(`△ ${w}`);
 if (errors.length > 0) {
