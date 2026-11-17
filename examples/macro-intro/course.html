@@ -1459,9 +1459,11 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     'portal', 'animate', 'set', 'animatemotion', 'animatetransform', 'foreignobject'];
   // 这些属性会让浏览器去取外部地址或跳转，除 href、src 外一律删掉
   var URL_ATTRS = ['action', 'formaction', 'poster', 'background', 'srcset', 'imagesrcset', 'data', 'cite', 'longdesc', 'ping', 'lowsrc', 'dynsrc', 'codebase', 'manifest'];
-  function safeUrl(v) {
+  // 页内锚点到处放行；data:image/ 只放行在 <img> 的 src 上（<a>、<use> 上的 data: 地址能带脚本或被打开）
+  function safeUrl(v, tagName, attrName) {
     var s = String(v).replace(/[\u0000- ]+/g, '');
-    return /^#/.test(s) || /^data:image\//i.test(s);
+    if (/^#/.test(s)) return true;
+    return tagName === 'img' && attrName === 'src' && /^data:image\//i.test(s);
   }
   function sanitizeHtml(html) {
     var tpl = document.createElement('template');
@@ -1479,7 +1481,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
           name === 'id' || name === 'name' ||
           // style 一律删：CSS 转义（\75rl(…)）能绕过任何关键字检查
           name === 'style' ||
-          ((name === 'href' || name === 'src' || name === 'xlink:href') && !safeUrl(value)) ||
+          ((name === 'href' || name === 'src' || name === 'xlink:href') && !safeUrl(value, node.localName.toLowerCase(), name)) ||
           // SVG 的 fill、mask、filter 等也按 CSS 解析：含 url( 或反斜杠转义的值一律删
           /\\/.test(value) || /url\(|image-set\(/i.test(value.replace(/[\s\\]+/g, ''));
         if (drop) node.removeAttribute(node.attributes[j].name);
@@ -1687,12 +1689,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     var note = isObj(d.resume) ? str(d.resume.note) : '';
     rn.hidden = !note;
     clear(rn);
-    if (note) {
-      rn.appendChild(el('span', 'label', '断点'));
-      var body = el('span');
-      body.innerHTML = C.inline(note);
-      rn.appendChild(body);
-    }
+    if (note) rn.append(el('span', 'label', '断点'), el('span', '', note)); // 断点说明是纯文本
 
     var up = $('updated');
     var t = str(d.updatedAt) ? new Date(d.updatedAt) : null;
@@ -2247,11 +2244,10 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
 
     renderGrowth(d, l.id);
 
-    var list = arr(l.cards);
+    // todo 的课可以寄存卡片，讲到这一课（不再是 todo）之前不显示
+    var list = l.status === 'todo' ? [] : arr(l.cards);
     list.forEach(function (c) { cards.appendChild(renderCard(d, c)); });
-    if (!list.length) {
-      cards.appendChild(el('p', 'empty-lesson', l.status === 'skipped' ? '这一课已跳过。' : '这一课还没开讲。'));
-    }
+    if (!list.length) cards.appendChild(el('p', 'empty-lesson', EMPTY_LESSON[l.status] || '这一课没有卡片。'));
 
     arr(l.readings).filter(isObj).forEach(function (r) {
       var li = el('li');
@@ -2261,6 +2257,12 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     });
     $('readings-section').hidden = !readings.firstChild;
   }
+
+  var EMPTY_LESSON = {
+    todo: '这一课还没开讲，讲到这一课时显示卡片。',
+    current: '这一课正在讲，卡片在课末写入。',
+    skipped: '这一课已跳过。'
+  };
 
   // ---------- 错误和警告 ----------
   function renderStatus() {

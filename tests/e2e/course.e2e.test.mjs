@@ -302,3 +302,82 @@ test('B14 渲染和报错路径都抛异常时，轮询也不会停', async (t) 
   rewriteData(file, (d) => { d.topic = '恢复之后的新主题'; });
   await eventually(async () => (await page.locator('#topic').innerText()) === '恢复之后的新主题', { message: '轮询已经停止' });
 });
+
+test('B15 todo 的课不显示寄存的卡片，变成 current 后才出现', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  rewriteData(file, (d) => {
+    d.lessons.push({ id: 'later', title: '以后的课', summary: '', status: 'todo', mastered: false, readings: [],
+      cards: [{ type: 'points', items: ['寄存的要点'] }] });
+  });
+  await eventually(async () => (await page.locator('#lessons li').count()) === 4, { message: '新课没有出现' });
+  await showLesson(page, 'later');
+  assert.equal(await current(page), 'later');
+  assert.equal(await page.locator('#cards .card').count(), 0);
+  assert.equal(await page.locator('#cards .empty-lesson').innerText(), '这一课还没开讲，讲到这一课时显示卡片。');
+  assert.doesNotMatch(await page.locator('#cards').innerText(), /寄存的要点/);
+  rewriteData(file, (d) => {
+    d.lessons.find((l) => l.id === 'wrap').status = 'done';
+    d.lessons.find((l) => l.id === 'later').status = 'current';
+  });
+  await eventually(async () => (await page.locator('#cards .card').count()) === 1, { message: '变成 current 后卡片没有出现' });
+  assert.match(await page.locator('#cards .card').innerText(), /寄存的要点/);
+  assert.equal(await page.locator('#cards .empty-lesson').count(), 0);
+});
+
+test('B16 没有卡片的课按状态说明：current 正在讲，todo 还没开讲', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  rewriteData(file, (d) => { d.lessons.find((l) => l.id === 'wrap').cards = []; });
+  await eventually(async () => (await page.locator('#cards .card').count()) === 0, { message: '卡片没有清空' });
+  assert.equal(await current(page), 'wrap');
+  assert.equal(await page.locator('#cards .empty-lesson').innerText(), '这一课正在讲，卡片在课末写入。');
+  rewriteData(file, (d) => { d.lessons.find((l) => l.id === 'wrap').status = 'todo'; });
+  await eventually(async () => (await page.locator('#cards .empty-lesson').innerText()) === '这一课还没开讲，讲到这一课时显示卡片。',
+    { message: 'todo 的说明不对' });
+});
+
+test('B17 断点说明 resume.note 按纯文本显示', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  rewriteData(file, (d) => { d.resume.note = '讲到 **利率** 和 `<b>粗</b>`'; });
+  await eventually(async () => (await page.locator('#resume-note').innerText()).includes('**利率**'), { message: '断点说明没有更新' });
+  assert.match(await page.locator('#resume-note').innerText(), /讲到 \*\*利率\*\* 和 `<b>粗<\/b>`/);
+  assert.equal(await page.locator('#resume-note strong, #resume-note code, #resume-note b').count(), 0);
+});
+
+test('B3b html 卡的 href 和 src：data:image 只留在 img 的 src 上，其余只放行页内锚点', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file, requests } = await open(t, b.browser, 'all-cards');
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const svgData = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cscript%3Ealert(1)%3C/script%3E%3C/svg%3E';
+  await showHtmlCard(page, file,
+    '<p>links</p>' +
+    `<a class="t-data" href="${svgData}">data 链接</a>` +
+    '<a class="t-js" href="javascript:window.__pwned=1">js 链接</a>' +
+    '<a class="t-js2" href=" java\tscript:window.__pwned=1">js 链接 2</a>' +
+    '<a class="t-ext" href="https://example.invalid/x">外部链接</a>' +
+    '<a class="t-anchor" href="#x">锚点</a>' +
+    `<img class="t-png" src="${png}" alt="png">` +
+    '<img class="t-ext-img" src="https://example.invalid/a.png" alt="ext">' +
+    `<svg width="10" height="10"><use class="t-use" href="${svgData}#a"></use><use class="t-use-x" xlink:href="${svgData}#a"></use><use class="t-use-anchor" href="#a"></use></svg>`,
+    'links');
+  const attr = (sel, name) => page.locator(`.card[data-type="html"] ${sel}`).getAttribute(name);
+  assert.equal(await attr('.t-data', 'href'), null);
+  assert.equal(await attr('.t-js', 'href'), null);
+  assert.equal(await attr('.t-js2', 'href'), null);
+  assert.equal(await attr('.t-ext', 'href'), null);
+  assert.equal(await attr('.t-anchor', 'href'), '#x');
+  assert.equal(await attr('.t-png', 'src'), png);
+  assert.equal(await attr('.t-ext-img', 'src'), null);
+  assert.equal(await attr('.t-use', 'href'), null);
+  assert.equal(await attr('.t-use-x', 'xlink:href'), null);
+  assert.equal(await attr('.t-use-anchor', 'href'), '#a');
+  await page.waitForTimeout(300);
+  assert.ok(requests.every((u) => u.startsWith('file:')), requests.join('\n'));
+  assert.equal(await page.evaluate(() => window.__pwned), undefined);
+});
