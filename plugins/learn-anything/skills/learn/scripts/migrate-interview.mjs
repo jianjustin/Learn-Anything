@@ -7,6 +7,7 @@
 // 退出码：0 成功，1 读不了源文件、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { types } from 'node:util';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
@@ -27,18 +28,40 @@ export class MigrateError extends Error {
 }
 
 // 旧课程文件是 JavaScript（键不加引号、有注释和尾逗号、用 join 拼多行字符串），不是 JSON。
-// 整个项目只有这里执行数据文件：沙箱里只有 window，限时，结果立刻转成普通 JSON 数据，沙箱里的对象不外泄。
+// 整个项目只有这里执行数据文件。上下文是一个没有任何宿主对象的空对象，window 在上下文里面创建
+// （否则 window.constructor.constructor 能拿到宿主的 Function，进而拿到 process）；
+// 执行和 JSON.stringify 都在上下文里、受同一个限时约束；从上下文到宿主的只有一个字符串，在宿主里 JSON.parse。
+const LOAD_TIMEOUT_MS = 2000;
+
+// 沙箱里抛出的东西不可信：对象可能带 getter 或是 Proxy，读它会在宿主里不受限时地执行沙箱代码。
+// 只从真正的原生 Error 的自有数据属性里取 message，其余一律不碰。
+function safeMessage(e) {
+  if (!types.isNativeError(e)) return '';
+  const d = Object.getOwnPropertyDescriptor(e, 'message');
+  return d && typeof d.value === 'string' ? d.value : '';
+}
+
 export function loadOldCourse(file) {
   const source = readFileSync(file, 'utf8');
-  const sandbox = vm.createContext({ window: {} }, { codeGeneration: { strings: false, wasm: false } });
+  const ctx = vm.createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false } });
+  let json;
   try {
-    vm.runInContext(source, sandbox, { timeout: 2000 });
+    vm.runInContext('var window = {};', ctx);
+    vm.runInContext(source, ctx, { timeout: LOAD_TIMEOUT_MS });
+    json = vm.runInContext('JSON.stringify(window.INTERVIEW_COURSE)', ctx, { timeout: LOAD_TIMEOUT_MS });
   } catch (e) {
-    throw new MigrateError(`无法执行旧课程文件 ${file}：${e.message}`);
+    const m = safeMessage(e);
+    throw new MigrateError(`无法读取旧课程文件 ${file}${m ? `：${m}` : '（执行出错、超时，或内容无法转成 JSON）'}`);
   }
-  const course = sandbox.window.INTERVIEW_COURSE;
+  if (typeof json !== 'string') throw new MigrateError(`${file} 没有给 window.INTERVIEW_COURSE 赋一个可以转成 JSON 的对象`);
+  let course;
+  try {
+    course = JSON.parse(json);
+  } catch {
+    throw new MigrateError(`${file} 里的 window.INTERVIEW_COURSE 无法转成 JSON`);
+  }
   if (!isObj(course)) throw new MigrateError(`${file} 没有给 window.INTERVIEW_COURSE 赋一个对象`);
-  return clone(course);
+  return course;
 }
 
 const NODE_STYLE = { service: 'box', store: 'pill', external: 'outline', placeholder: 'ghost' };
@@ -112,7 +135,12 @@ function convertLesson(l, i) {
 // 旧格式 → 新格式。不修改传入的对象。规则没提到的字段（未知的顶层字段、卡片类型、卡片/课程/面板元素字段）原样带过去。
 export function convertCourse(old) {
   if (!isObj(old)) throw CONVERT_ERR('旧课程不是对象');
-  const o = clone(old);
+  let o;
+  try {
+    o = clone(old);
+  } catch (e) {
+    throw CONVERT_ERR(`旧课程里有无法转成 JSON 的值：${e.message}`);
+  }
   for (const k of GENERATED_TOP) {
     if (k in o) throw CONVERT_ERR(`旧课程已经有 ${k} 字段`);
   }
@@ -170,6 +198,25 @@ function shapeOf(course) {
   };
 }
 
+// a 是 b 本身或在 b 里面
+function isInside(a, b) {
+  const r = path.relative(b, a);
+  return r === '' || (r !== '..' && !r.startsWith(`..${path.sep}`) && !path.isAbsolute(r));
+}
+
+// 解析符号链接后的绝对路径；路径还不存在时，对最近的已存在的上级解析，再接上剩下的部分
+function realish(p) {
+  let cur = path.resolve(p);
+  const rest = [];
+  while (!existsSync(cur)) {
+    rest.unshift(path.basename(cur));
+    const up = path.dirname(cur);
+    if (up === cur) break;
+    cur = up;
+  }
+  return path.join(realpathSync.native(cur), ...rest);
+}
+
 const summaryLine = (c) => Object.entries(c).map(([k, v]) => `${k}=${v}`).join(' ');
 
 // 读、转换、校验、核对都在内存里完成，通过之后才建课和写文件。返回 { dir, counts, warnings }
@@ -191,6 +238,14 @@ export function migrateCourse(oldDir, coursesDir, { write = writeDataFile } = {}
   const after = countsOf(out);
   if (JSON.stringify(before) !== JSON.stringify(after) || JSON.stringify(shapeOf(old)) !== JSON.stringify(shapeOf(out))) {
     throw new MigrateError('转换前后的数量不一致', [`旧：${summaryLine(before)}`, `新：${summaryLine(after)}`]);
+  }
+
+  // courses_dir 不能是源目录或在它里面，源目录也不能是这次要建的目录或在它里面：否则会写进源目录
+  const srcReal = realish(oldDir);
+  const homeReal = realish(coursesDir);
+  const targetReal = path.join(homeReal, slug);
+  if (isInside(homeReal, srcReal) || isInside(srcReal, targetReal)) {
+    throw new MigrateError(`目标位置与源目录重叠，拒绝写入：源目录 ${srcReal}，课程目录 ${homeReal}（将创建 ${targetReal}）`);
   }
 
   // 记下现状，写入失败时据此还原

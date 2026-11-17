@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT, SCRIPTS_DIR } from '../helpers/paths.mjs';
@@ -230,4 +230,119 @@ test('写入失败时清掉这次创建的东西，index-data.js 和 index.html 
   const empty = tmp();
   assert.throws(() => migrateCourse(oldDir, empty, fail), /磁盘满了/);
   assert.deepEqual(readdirSync(empty), []);
+});
+
+// ---- 评审后补的用例 ----
+const writeOld = (source) => {
+  const dir = tmp();
+  writeFileSync(path.join(dir, 'course-data.js'), source);
+  return dir;
+};
+const MIN = 'version: 1, topic: "t", slug: "esc", type: "knowledge", growth: [], lessons: []';
+
+test('沙箱出不去：通过 window 或 this 的 constructor 链拿不到宿主的 process', () => {
+  for (const root of ['window', 'this']) {
+    const dir = writeOld(`var r; try { r = typeof ${root}.constructor.constructor('return process')(); } catch (e) { r = 'blocked'; }
+      window.INTERVIEW_COURSE = { ${MIN}, escaped: r };`);
+    const c = loadOldCourse(path.join(dir, 'course-data.js'));
+    assert.notEqual(c.escaped, 'object', `${root} 的 constructor 链拿到了宿主对象`);
+  }
+});
+
+test('宿主的全局在沙箱里看不到，沙箱里的 window 是沙箱自己的对象', () => {
+  const dir = writeOld(`window.INTERVIEW_COURSE = { ${MIN}, g: [typeof require, typeof process, typeof Buffer, typeof globalThis.window] };`);
+  assert.deepEqual(loadOldCourse(path.join(dir, 'course-data.js')).g, ['undefined', 'undefined', 'undefined', 'object']);
+});
+
+test('转成 JSON 的过程也受限时约束：getter 死循环、toJSON 死循环、抛出带 getter 的对象都在限时内正常报错', () => {
+  for (const body of [
+    'window.INTERVIEW_COURSE = { get x() { while (true) {} } };',
+    'window.INTERVIEW_COURSE = { toJSON() { while (true) {} } };',
+    'throw { get message() { while (true) {} } };',
+  ]) {
+    const dir = writeOld(body);
+    const t0 = Date.now();
+    const r = spawnSync(process.execPath, [script, dir, path.join(tmp(), 'courses')], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(r.status, 1, body);
+    assert.match(r.stderr, /✗/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+    assert.ok(Date.now() - t0 < 10000, body);
+  }
+});
+
+test('旧文件没有赋值、或赋的值转成 JSON 后是 undefined：正常报错', () => {
+  for (const body of ['var x = 1;', 'window.INTERVIEW_COURSE = undefined;', 'window.INTERVIEW_COURSE = function () {};', 'window.INTERVIEW_COURSE = [1];']) {
+    const dir = writeOld(body);
+    const r = run(dir, path.join(tmp(), 'courses'));
+    assert.equal(r.status, 1, body);
+    assert.match(r.stderr, /✗/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+  }
+});
+
+test('BigInt 和循环引用：退出 1，stderr 是 ✗ 行而不是堆栈', () => {
+  for (const body of [
+    `window.INTERVIEW_COURSE = { ${MIN}, big: 10n };`,
+    `var c = { ${MIN} }; c.self = c; window.INTERVIEW_COURSE = c;`,
+  ]) {
+    const home = path.join(tmp(), 'courses');
+    const r = run(writeOld(body), home);
+    assert.equal(r.status, 1, body);
+    assert.match(r.stderr, /✗/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /);
+    assert.ok(!existsSync(home));
+  }
+});
+
+// 目录下所有文件的相对路径和内容摘要
+function snapshotDir(dir) {
+  const rows = [];
+  const walk = (d) => {
+    for (const name of readdirSync(d).sort()) {
+      const p = path.join(d, name);
+      if (statSync(p).isDirectory()) { rows.push(`${path.relative(dir, p)}/`); walk(p); }
+      else rows.push(`${path.relative(dir, p)} ${hashOf(p)}`);
+    }
+  };
+  walk(dir);
+  return rows;
+}
+
+test('courses_dir 是源目录或在源目录里面：退出 1，源目录原样不动', () => {
+  const src = oldCopy(() => {});
+  const before = snapshotDir(src);
+  for (const home of [src, path.join(src, 'courses'), path.join(src, 'a/b')]) {
+    const r = run(src, home);
+    assert.equal(r.status, 1, home);
+    assert.match(r.stderr, /✗/);
+    assert.ok(r.stderr.includes(src));
+    assert.deepEqual(snapshotDir(src), before);
+  }
+});
+
+test('源目录就是这次要创建的目录或在它里面：退出 1，什么都不建', () => {
+  const home = tmp();
+  const src = path.join(home, 'old-interview');
+  mkdirSync(src);
+  writeFileSync(path.join(src, 'course-data.js'), readFileSync(oldFile));
+  const before = snapshotDir(home);
+  assert.equal(run(src, home).status, 1);
+  assert.deepEqual(snapshotDir(home), before);
+  const nested = path.join(src, 'deeper');
+  mkdirSync(nested);
+  writeFileSync(path.join(nested, 'course-data.js'), readFileSync(oldFile));
+  const before2 = snapshotDir(home);
+  const r = run(nested, home);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /✗/);
+  assert.deepEqual(snapshotDir(home), before2);
+});
+
+test('通过符号链接指到源目录的 courses_dir 也被拒绝', () => {
+  const src = oldCopy(() => {});
+  const link = path.join(tmp(), 'link');
+  symlinkSync(src, link);
+  const before = snapshotDir(src);
+  assert.equal(run(src, link).status, 1);
+  assert.deepEqual(snapshotDir(src), before);
 });
