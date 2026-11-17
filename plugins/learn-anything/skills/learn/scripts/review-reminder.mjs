@@ -8,16 +8,10 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isSafeDir } from './lib/course-index.mjs';
 import { readDataFile } from './lib/data-file.mjs';
 
 const STATE_FILE = 'review-reminder.json';
-
-// 与总览页 isSafeDir 同一条规则：只接受朴素的相对路径
-function isSafeDir(dir) {
-  if (typeof dir !== 'string' || dir === '') return false;
-  if (/[\u0000-\u001f\u007f:\\]/.test(dir) || dir.startsWith('/') || dir.includes('..')) return false;
-  return dir.split('/').every((seg) => seg !== '' && seg !== '.');
-}
 
 function isReviewItem(item) {
   return item !== null && typeof item === 'object' && !Array.isArray(item)

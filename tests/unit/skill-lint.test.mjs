@@ -53,3 +53,57 @@ test('data-format.md 里的完整示例是合法的课程数据', () => {
     assert.deepEqual(plain(C.validateCourse(d, { dirName: d.slug }).errors), []);
   }
 });
+
+// frontmatter 助手不解析多行值，allowed-tools 按原文的列表行取
+const allowedTools = read('SKILL.md').split(/^---$/m)[1].split('\n').filter((l) => l.startsWith('  - ')).map((l) => l.slice(4));
+
+// 「下一课」的定义在三处用同一句话，改一处就要改三处
+const NEXT_LESSON = '下一课是顺序上在本课之后的第一门 `todo` 的课；本课之后没有 `todo` 的课时，取整个列表里第一门 `todo` 的课；都没有就是课程讲完了，`resume` 留在本课并说明讲完。已经 `done` 或 `skipped` 的课不会被改回 `current`。';
+
+test('「下一课」的定义在 SKILL.md、lesson-guide.md、data-format.md 里是同一句话', () => {
+  for (const rel of ['SKILL.md', 'references/lesson-guide.md', 'references/data-format.md']) {
+    assert.ok(read(rel).includes(NEXT_LESSON), rel);
+  }
+  assert.ok(body.includes('课末只动本课卡片、本课状态、下一课的状态和 `resume`'));
+});
+
+test('入口先运行 list-courses.mjs 列课程，选定之后才读那一门课的数据', () => {
+  const entry = body.split('## 入口')[1].split('\n## ')[0];
+  assert.ok(entry.includes('node ${CLAUDE_SKILL_DIR}/scripts/list-courses.mjs "${user_config.courses_dir}"'));
+  assert.ok(entry.includes('学习者选定之后才读那一门课的 `course-data.js`'));
+  assert.ok(!/先读 `\$\{user_config\.courses_dir\}\/index-data\.js`/.test(entry));
+  assert.ok(allowedTools.includes('Bash(node ${CLAUDE_SKILL_DIR}/scripts/list-courses.mjs *)'));
+});
+
+test('页面模板更新后用 refresh-pages.mjs 刷新', () => {
+  const rules = body.split('## 文件操作规则')[1].split('\n## ')[0];
+  assert.ok(rules.includes('node ${CLAUDE_SKILL_DIR}/scripts/refresh-pages.mjs "${user_config.courses_dir}"'));
+  assert.ok(allowedTools.includes('Bash(node ${CLAUDE_SKILL_DIR}/scripts/refresh-pages.mjs *)'));
+});
+
+test('lesson-guide.md：插话记进待回顾时 lesson 为 null，回顾答上来不改 mastered', () => {
+  const guide = read('references/lesson-guide.md');
+  assert.ok(guide.includes('插话产生的待回顾条目一律写 `"lesson": null`'));
+  assert.ok(!guide.includes('`lesson` 写最相关的课'));
+});
+
+test('lesson-guide.md：有一节说明怎样补测一门 done 的课', () => {
+  const guide = read('references/lesson-guide.md');
+  const sec = guide.split(/^## \d+\. 补测$/m)[1]?.split('\n## ')[0];
+  assert.ok(sec, '缺少「补测」一节');
+  for (const w of ['`done`', '`practice`', '`mastered` 设为 `true`', '`review` 里没有指向这一课的条目']) assert.ok(sec.includes(w), w);
+});
+
+test('data-format.md：updatedAt 取当前本地时间，给出取时间的命令', () => {
+  const doc = read('references/data-format.md');
+  assert.ok(doc.includes('date +%Y-%m-%dT%H:%M:%S%z'));
+  assert.ok(doc.includes('`+0800` 写成 `+08:00`'));
+});
+
+test('data-format.md：resume.note 是纯文本；todo 的课可以寄存卡片', () => {
+  const doc = read('references/data-format.md');
+  const [rich, plainLine] = doc.split('## 2. 文本格式')[1].split('\n').filter((l) => l.startsWith('- **'));
+  assert.ok(!rich.includes('resume.note'));
+  assert.ok(plainLine.includes('`resume.note`'));
+  assert.ok(doc.includes('`todo` 的课可以寄存卡片，讲到之前页面不显示'));
+});

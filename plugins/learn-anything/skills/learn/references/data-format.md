@@ -17,8 +17,8 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 
 ## 2. 文本格式
 
-- **带格式的文本**支持 `**粗体**`、`` `代码` `` 和 `\n` 换行，其余一切 HTML 都转义后按原文显示。适用于：卡片正文（`items`、`text`、`question`、`approach`、`answer`、`q`、`a`、`rubric`、`yours`、`why`、表格的 `headers` 和单元格、对比的 `pros`、`cons`、`conclusion`），`mission` 三项，`approach`，`resume.note`，课程 `summary`，`review[].text`，资料 `note`，代码版本的 `note`，时间线事件的 `title` 和 `detail`。
-- **纯文本**，写 `**` 会原样显示：`topic`、`notice`、课程 `title`、卡片 `title`、对比的 `name`、资料 `title` 和 `author`、延伸阅读 `where`、节点和连线和分组的 `label`、标注 `text`、版本 `label`、`metricLabel`。
+- **带格式的文本**支持 `**粗体**`、`` `代码` `` 和 `\n` 换行，其余一切 HTML 都转义后按原文显示。适用于：卡片正文（`items`、`text`、`question`、`approach`、`answer`、`q`、`a`、`rubric`、`yours`、`why`、表格的 `headers` 和单元格、对比的 `pros`、`cons`、`conclusion`），`mission` 三项，`approach`，课程 `summary`，`review[].text`，资料 `note`，代码版本的 `note`，时间线事件的 `title` 和 `detail`。
+- **纯文本**，写 `**` 会原样显示：`topic`、`notice`、`resume.note`、课程 `title`、卡片 `title`、对比的 `name`、资料 `title` 和 `author`、延伸阅读 `where`、节点和连线和分组的 `label`、标注 `text`、版本 `label`、`metricLabel`。
 - `html` 卡片是唯一渲染 HTML 的地方，见第 6 节。
 
 ## 3. 顶层字段
@@ -35,7 +35,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | `researched` | 是 | `"yes"` 大纲经资料核对；`"no"` 想核对但做不到；`"skipped"` 模板或学习者决定不调研 |
 | `resources` | 是 | 资料清单，可以为空数组，见第 4 节 |
 | `notice` | 否 | 页面顶部提示条的文字，如「示范案例，请换成你自己的经历」 |
-| `updatedAt` | 建议 | ISO 8601 带时区，如 `"2026-11-17T15:20:00+08:00"`；每次修改都更新 |
+| `updatedAt` | 建议 | 写入时的当前本地时间，ISO 8601 带时区，如 `"2026-11-17T15:20:00+08:00"`；每次修改都更新。时间用 `date +%Y-%m-%dT%H:%M:%S%z` 现取，把输出末尾的 `+0800` 写成 `+08:00`；不要照抄本文示例里的时间 |
 | `resume` | 建议 | `{ "lesson": "<课程 id>", "note": "讲到哪、下一步讲什么" }`。`note` 一句话，约 60 字以内，页头显示为「断点」；页面打开时定位到 `resume.lesson`，它变了页面会跳过去 |
 | `review` | 是 | 待回顾清单，只放未解决的条目，可以为空数组，见第 5 节 |
 | `growth` | 是 | 生长面板数组，可以为空数组，见第 7 节 |
@@ -66,7 +66,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 { "lesson": "inflation", "text": "说出通胀预期自我实现的机制" }
 ```
 
-- `lesson` 是课程 id 或 `null`（不属于某一课的问题）。回顾答上来之后，靠它知道把哪一课改记为已掌握。
+- `lesson` 是课程 id 或 `null`。检验没通过产生的条目写那一课的 id，回顾答上来之后靠它知道把哪一课改记为已掌握；插话记下的问题一律写 `null`。
 - `text` 写成下次能直接拿来问的样子。
 - 新条目加在末尾，回顾时从最前面取。解决了就删掉，不留「已解决」的条目。
 
@@ -92,7 +92,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | `status` | 是 | `todo`、`current`、`done`、`skipped`；同一时间最多一个 `current` |
 | `mastered` | 是 | 布尔。只有检验中表现出掌握才为 `true`；页面把「已讲」和「已掌握」分开显示 |
 | `readings` | 是 | 延伸阅读：`[{ "resource": "<资料 id>", "where": "第 3 章第 2 节" }]`，可以为空。章节号只能来自核对过的目录：章节没核对的，以及 `researched` 为 `"no"` 或 `"skipped"` 时的每一份，`where` 都写「章节未核对」；整份资料都要看、目录也核对过的写「全文」 |
-| `cards` | 是 | 卡片数组；`todo` 的课为空数组 |
+| `cards` | 是 | 卡片数组；新建的 `todo` 的课为空数组。`todo` 的课可以寄存卡片，讲到之前页面不显示，课变成 `current` 后才出现 |
 
 ### 卡片
 
@@ -197,7 +197,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 
 ## 8. 写入清单
 
-每一阶段写完都运行校验命令，并更新 `updatedAt`。
+每一阶段写完都运行校验命令，并把 `updatedAt` 更新为当前时间（取法见第 3 节）。
 
 ### 建课（学习者确认大纲之后）
 
@@ -236,12 +236,12 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 ### 课末
 
 1. 往本课 `cards` 写入卡片：至少 `points` 和 `quote`；学习者插过话加 `questions`；其余按内容选。已有的 `practice` 卡保留，卡片按讲的顺序排。
-2. 本课 `status: "done"`；下一课（跳过 `skipped` 的）`status: "current"`。
+2. 本课 `status: "done"`；下一课 `status: "current"`。下一课是顺序上在本课之后的第一门 `todo` 的课；本课之后没有 `todo` 的课时，取整个列表里第一门 `todo` 的课；都没有就是课程讲完了，`resume` 留在本课并说明讲完。已经 `done` 或 `skipped` 的课不会被改回 `current`。
 3. `resume: { "lesson": "<下一课 id>", "note": "第 N 课已完成，下一课：……" }`。没有下一课时 `resume.lesson` 留在本课，`note` 写「全部课程已讲完」。
 
 ### 回顾
 
-- 答上来：从 `review` 删掉这一条；它的 `lesson` 不为 `null`、且没有别的条目指向这一课时，把这一课 `mastered` 设为 `true`。
+- 答上来：从 `review` 删掉这一条；它的 `lesson` 不为 `null`、且没有别的条目指向这一课时，把这一课 `mastered` 设为 `true`。`lesson` 为 `null` 的条目只删条目，不改任何课的 `mastered`。
 - 没答上来：不改数据。
 
 ### 调整大纲
