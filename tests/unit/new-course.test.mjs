@@ -93,3 +93,53 @@ test('createCourse 可以被导入，导入本身没有副作用', async () => {
   assert.throws(() => mod.createCourse(home, 'via-import'), { code: 'exists' });
   assert.throws(() => mod.createCourse(home, 'Bad'), { code: 'slug' });
 });
+
+// ---- 整体审查后的修复：课程目录只接受绝对路径（D1）、回滚（D4） ----
+
+test('课程目录为空、是相对路径或含没替换的占位符：退出 1，当前目录里什么都不建', () => {
+  const cwd = tmp();
+  for (const home of ['', 'rel/dir', './x', '${user_config.courses_dir}', `${cwd}/\${user_config.courses_dir}`]) {
+    const r = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'new-course.mjs'), home, 'x'], { encoding: 'utf8', cwd });
+    assert.equal(r.status, 1, home);
+    assert.match(r.stderr, /^✗ /, home);
+    assert.equal(r.stdout, '', home);
+  }
+  assert.deepEqual(readdirSync(cwd), []);
+});
+
+const { createCourse } = await import(path.join(SCRIPTS_DIR, 'new-course.mjs'));
+const diskFull = () => { throw new Error('磁盘满了'); };
+
+test('回滚：登记失败时删掉课程目录、这次复制的 index.html 和新建的上级目录', () => {
+  const base = tmp();
+  writeFileSync(path.join(base, 'keep.txt'), 'x');
+  assert.throws(() => createCourse(path.join(base, 'a', 'b', 'courses'), 'macro', { writeIndex: diskFull }), /磁盘满了/);
+  assert.deepEqual(readdirSync(base), ['keep.txt']);
+});
+
+test('回滚：已有的课程目录、登记表和 index.html 原样保留', () => {
+  const home = tmp();
+  const indexText = 'window.LEARN_INDEX = {"version":1,"courses":[{"slug":"other","dir":"other"}]};\n';
+  writeFileSync(path.join(home, 'index-data.js'), indexText);
+  writeFileSync(path.join(home, 'index.html'), 'mine');
+  assert.throws(() => createCourse(home, 'macro', { writeIndex: diskFull }), /磁盘满了/);
+  assert.deepEqual(readdirSync(home).sort(), ['index-data.js', 'index.html']);
+  assert.equal(readFileSync(path.join(home, 'index-data.js'), 'utf8'), indexText);
+  assert.equal(readFileSync(path.join(home, 'index.html'), 'utf8'), 'mine');
+  // 没有 index.html 时，这次复制的那份也删掉
+  const fresh = tmp();
+  assert.throws(() => createCourse(fresh, 'macro', { writeIndex: diskFull }), /磁盘满了/);
+  assert.deepEqual(readdirSync(fresh), []);
+});
+
+test('回滚本身出错：报出的仍是原来的错误，回滚错误附在后面', () => {
+  const home = tmp();
+  const removed = [];
+  const remove = (p) => { removed.push(p); throw new Error('权限不够'); };
+  assert.throws(() => createCourse(home, 'macro', { writeIndex: diskFull, remove }), (e) => {
+    assert.match(e.message, /^磁盘满了/);
+    assert.match(e.message, /清理时出错.*权限不够/);
+    return true;
+  });
+  assert.ok(removed.includes(path.join(home, 'macro')));
+});

@@ -19,16 +19,7 @@ window.LEARN_COURSE = {
     "lesson": "pitch",
     "note": "讲完 10 分钟路线和开场白，下一步：常见追问与应对"
   },
-  "review": [
-    {
-      "lesson": null,
-      "text": "预扣和实扣的区别"
-    },
-    {
-      "lesson": null,
-      "text": "Kafka 分区数怎么定"
-    }
-  ],
+  "review": [],
   "growth": [
     {
       "kind": "diagram",
@@ -1265,6 +1256,11 @@ window.LEARN_COURSE = {
       "mastered": false,
       "readings": [],
       "cards": [
+        {
+          "type": "note",
+          "title": "迁移来的备忘",
+          "text": "预扣和实扣的区别\nKafka 分区数怎么定"
+        },
         {
           "type": "steps",
           "title": "10 分钟路线",

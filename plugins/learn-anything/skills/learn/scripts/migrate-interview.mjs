@@ -2,16 +2,18 @@
 // 用法：node migrate-interview.mjs <旧课程目录> <courses_dir>
 // 把 interview-sprint 的旧课程（<旧课程目录>/course-data.js）转换成新格式，建课并写入 <courses_dir>/<slug>/。
 // 转换规则见设计 5.15。不修改源目录。先在内存里转换、校验、核对数量，全部通过才动磁盘；
-// 写入失败时清掉这次创建的东西，index-data.js 恢复原样。
+// 写入失败时清掉这次创建的东西（包括新建的上级目录），index-data.js 恢复原样。
+// <courses_dir> 必须是绝对路径；<旧课程目录> 可以是相对路径。
 // 成功时 stdout 只有一行数量；错误和警告写到 stderr。
-// 退出码：0 成功，1 读不了源文件、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
+// 退出码：0 成功，1 课程目录不合法、读不了源文件、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
+import { coursesDirProblem } from './lib/course-index.mjs';
 import { readDataFile, writeDataFile } from './lib/data-file.mjs';
-import { createCourse } from './new-course.mjs';
+import { createCourse, rollback } from './new-course.mjs';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -60,6 +62,7 @@ export function loadOldCourse(file) {
 
 const NODE_STYLE = { service: 'box', store: 'pill', external: 'outline', placeholder: 'ghost' };
 const NOTICE = '示范案例，请换成你自己的经历';
+const MEMO_TITLE = '迁移来的备忘';
 const CONVERT_ERR = (msg) => new MigrateError(`无法转换：${msg}`);
 
 // 新格式里由转换补出来的顶层字段；旧课程已经有同名字段时不知道该留哪个，宁可拒绝也不覆盖
@@ -126,6 +129,15 @@ function convertLesson(l, i) {
   return out;
 }
 
+// 旧 review 是搁置的问题和备忘，不是掌握缺口：合成一张备忘卡，放在这里返回的那一课的最前面。
+// resume.lesson 那一课；没有 resume 时第一门不是 done 的课；都是 done 就放最后一课。没有课时返回 -1
+export function memoLessonIndex(lessons, resume) {
+  const byResume = isObj(resume) ? lessons.findIndex((l) => isObj(l) && l.id === resume.lesson) : -1;
+  if (byResume >= 0) return byResume;
+  const notDone = lessons.findIndex((l) => isObj(l) && l.status !== 'done');
+  return notDone >= 0 ? notDone : lessons.length - 1;
+}
+
 // 旧格式 → 新格式。不修改传入的对象。规则没提到的字段（未知的顶层字段、卡片类型、卡片/课程/面板元素字段）原样带过去。
 export function convertCourse(old) {
   if (!isObj(old)) throw CONVERT_ERR('旧课程不是对象');
@@ -155,9 +167,13 @@ export function convertCourse(old) {
   out.resources = [];
   if (o.demoCase === true) out.notice = NOTICE;
   for (const k of ['updatedAt', 'resume']) if (k in o) out[k] = o[k];
-  out.review = list(o.review).map((text) => ({ lesson: null, text }));
+  out.review = [];
   out.growth = list(o.growth).map(convertPanel);
   out.lessons = list(o.lessons).map(convertLesson);
+  const memoAt = memoLessonIndex(out.lessons, out.resume);
+  if (list(o.review).length > 0 && isObj(out.lessons[memoAt])) {
+    out.lessons[memoAt].cards.unshift({ type: 'note', title: MEMO_TITLE, text: o.review.join('\n') });
+  }
   // demoCase: false 没有对应的新字段；其他取值保留，免得悄悄丢掉
   if ('demoCase' in o && o.demoCase !== true && o.demoCase !== false) out.demoCase = o.demoCase;
   for (const [k, v] of Object.entries(o)) if (!OLD_TOP.includes(k)) out[k] = v;
@@ -213,8 +229,33 @@ function realish(p) {
 
 const summaryLine = (c) => Object.entries(c).map(([k, v]) => `${k}=${v}`).join(' ');
 
+// 转换后应有的数量：与源一致，只有放了备忘卡的那一课多一张
+function expectedCounts(old) {
+  const counts = countsOf(old);
+  const shape = shapeOf(old);
+  if (list(old.review).length > 0) {
+    const at = memoLessonIndex(list(old.lessons), old.resume);
+    if (shape.lessons[at]) {
+      counts.cards += 1;
+      shape.lessons[at][1] += 1;
+    }
+  }
+  return { counts, shape };
+}
+
+// p 不存在时，返回这次要新建的最外层目录；p 已存在时返回 null
+function outermostMissing(p) {
+  let cur = path.resolve(p);
+  if (existsSync(cur)) return null;
+  while (!existsSync(path.dirname(cur)) && path.dirname(cur) !== cur) cur = path.dirname(cur);
+  return cur;
+}
+
 // 读、转换、校验、核对都在内存里完成，通过之后才建课和写文件。返回 { dir, counts, warnings }
-export function migrateCourse(oldDir, coursesDir, { write = writeDataFile } = {}) {
+// write、remove 只供测试注入失败
+export function migrateCourse(oldDir, coursesDir, { write = writeDataFile, remove = rmSync } = {}) {
+  const problem = coursesDirProblem(coursesDir);
+  if (problem) throw new MigrateError(problem);
   const oldFile = path.join(path.resolve(oldDir), 'course-data.js');
   if (!existsSync(oldFile)) throw new MigrateError(`找不到旧课程文件：${oldFile}`);
   const old = loadOldCourse(oldFile);
@@ -228,9 +269,9 @@ export function migrateCourse(oldDir, coursesDir, { write = writeDataFile } = {}
       ...warnings.map((w) => `△ ${w}`),
     ]);
   }
-  const before = countsOf(old);
+  const { counts: before, shape } = expectedCounts(old);
   const after = countsOf(out);
-  if (JSON.stringify(before) !== JSON.stringify(after) || JSON.stringify(shapeOf(old)) !== JSON.stringify(shapeOf(out))) {
+  if (JSON.stringify(before) !== JSON.stringify(after) || JSON.stringify(shape) !== JSON.stringify(shapeOf(out))) {
     throw new MigrateError('转换前后的数量不一致', [`旧：${summaryLine(before)}`, `新：${summaryLine(after)}`]);
   }
 
@@ -244,7 +285,7 @@ export function migrateCourse(oldDir, coursesDir, { write = writeDataFile } = {}
 
   // 记下现状，写入失败时据此还原
   const home = path.resolve(coursesDir);
-  const homeExisted = existsSync(home);
+  const createdRoot = outermostMissing(home);
   const indexFile = path.join(home, 'index-data.js');
   const indexPage = path.join(home, 'index.html');
   const indexBefore = existsSync(indexFile) ? readFileSync(indexFile) : null;
@@ -263,12 +304,16 @@ export function migrateCourse(oldDir, coursesDir, { write = writeDataFile } = {}
       throw new Error('写入后读回的内容与转换结果不一致');
     }
   } catch (e) {
-    rmSync(created.dir, { recursive: true, force: true });
-    if (!indexPageExisted) rmSync(indexPage, { force: true });
-    if (indexBefore === null) rmSync(indexFile, { force: true });
-    else writeFileSync(indexFile, indexBefore);
-    if (!homeExisted) rmSync(home, { recursive: true, force: true });
-    throw new MigrateError(`写入失败，已还原：${e.message}`);
+    const error = new MigrateError(`写入失败：${e.message}`);
+    if (indexBefore !== null) {
+      try {
+        writeFileSync(indexFile, indexBefore);
+      } catch (restoreError) {
+        error.message += `（index-data.js 没能恢复：${restoreError.message}）`;
+      }
+    }
+    const undo = [createdRoot, created.dir, indexPageExisted ? null : indexPage, indexBefore === null ? indexFile : null];
+    throw rollback(error, undo.filter(Boolean), remove);
   }
   return { dir: created.dir, counts: after, warnings };
 }

@@ -9,7 +9,7 @@ import { ROOT, SCRIPTS_DIR } from '../helpers/paths.mjs';
 import { loadCore, plain } from '../helpers/load-core.mjs';
 
 const script = path.join(SCRIPTS_DIR, 'migrate-interview.mjs');
-const { loadOldCourse, convertCourse, countsOf, migrateCourse } = await import(script);
+const { loadOldCourse, convertCourse, countsOf, migrateCourse, MigrateError } = await import(script);
 const { readDataFile } = await import(path.join(SCRIPTS_DIR, 'lib/data-file.mjs'));
 const oldDir = path.join(ROOT, 'tests/fixtures/old-interview');
 const oldFile = path.join(oldDir, 'course-data.js');
@@ -42,8 +42,52 @@ test('顶层字段的顺序与设计 5.3 的表格一致', () => {
   ]);
 });
 
-test('待回顾转成带课程 id 的条目', () => {
-  assert.deepEqual(out.review, [{ lesson: null, text: '原文一' }, { lesson: null, text: '原文二' }]);
+const MEMO = (text) => ({ type: 'note', title: '迁移来的备忘', text });
+const memoOf = (course) => course.lessons.map((l) => l.id).filter((id, i) => course.lessons[i].cards[0]?.title === '迁移来的备忘');
+
+test('旧待回顾不迁成待回顾，合成一张备忘卡放在 resume.lesson 那一课的最前面', () => {
+  assert.deepEqual(out.review, []);
+  assert.deepEqual(out.lessons[1].cards, [MEMO('原文一\n原文二')]);
+  assert.deepEqual(memoOf(out), ['fix']);
+  assert.equal(out.lessons[0].cards.length, old.lessons[0].cards.length);
+});
+
+test('备忘卡的位置：resume.lesson 优先于第一门没讲完的课', () => {
+  const o = structuredClone(old);
+  o.resume.lesson = 'bg';
+  const r = convertCourse(o);
+  assert.deepEqual(memoOf(r), ['bg']);
+  assert.deepEqual(r.lessons[0].cards[0], MEMO('原文一\n原文二'));
+  assert.equal(r.lessons[0].cards.length, old.lessons[0].cards.length + 1);
+  assert.deepEqual(r.lessons[1].cards, []);
+});
+
+test('备忘卡的位置：没有 resume 时放在第一门不是 done 的课', () => {
+  const o = structuredClone(old);
+  delete o.resume;
+  o.lessons.push({ id: 'later', title: '后面', summary: '', status: 'todo' });
+  const r = convertCourse(o);
+  assert.deepEqual(memoOf(r), ['fix']);
+  assert.deepEqual(plain(C.validateCourse(r, { dirName: 'old-interview' }).errors), []);
+});
+
+test('备忘卡的位置：没有 resume 且都是 done 时放在最后一课', () => {
+  const o = structuredClone(old);
+  delete o.resume;
+  o.lessons[1].status = 'done';
+  o.lessons.push({ id: 'last', title: '最后', summary: '', status: 'done', cards: [{ type: 'points', items: ['x'] }] });
+  const r = convertCourse(o);
+  assert.deepEqual(memoOf(r), ['last']);
+  assert.deepEqual(r.lessons[2].cards, [MEMO('原文一\n原文二'), { type: 'points', items: ['x'] }]);
+});
+
+test('旧待回顾为空时不加备忘卡', () => {
+  const o = structuredClone(old);
+  o.review = [];
+  const r = convertCourse(o);
+  assert.deepEqual(r.review, []);
+  assert.deepEqual(memoOf(r), []);
+  assert.deepEqual(countsOf(r), countsOf(o));
 });
 
 test('updatedAt、resume、课程的 id/title/summary/status 和其余卡片字段原样保留', () => {
@@ -70,7 +114,9 @@ test('卡片改名并补上标题，已有的标题保留', () => {
 
 test('每课补上 mastered 和 readings，没有卡片的课得到空数组', () => {
   for (const l of out.lessons) assert.deepEqual([l.mastered, l.readings], [false, []]);
-  assert.deepEqual(out.lessons[1].cards, []);
+  const o = structuredClone(old);
+  o.review = [];
+  assert.deepEqual(convertCourse(o).lessons[1].cards, []);
 });
 
 test('数量不变，源对象不被修改', () => {
@@ -78,7 +124,7 @@ test('数量不变，源对象不被修改', () => {
   const again = convertCourse(old);
   assert.equal(JSON.stringify(old), snapshot);
   assert.deepEqual(again, out);
-  assert.deepEqual(countsOf(out), countsOf(old));
+  assert.deepEqual(countsOf(out), { ...countsOf(old), cards: countsOf(old).cards + 1 }); // 多出的一张是备忘卡
   assert.equal(old.growth[0].kind, 'architecture');
 });
 
@@ -107,7 +153,7 @@ test('规则没提到的字段原样保留：未知顶层字段、卡片类型�
   assert.equal(r.growth[0].edges[0].style, 'dashed');
   assert.equal(r.growth[2].better, 'higher');
   assert.equal(r.growth[2].events[0].metric.unit, 'ms');
-  assert.deepEqual(countsOf(r), countsOf(o));
+  assert.deepEqual(countsOf(r), { ...countsOf(o), cards: countsOf(o).cards + 1 });
 });
 
 test('没有 demoCase、没有 type、没有 review 的旧课程也能转', () => {
@@ -144,7 +190,8 @@ test('命令行：写入新目录并登记，不改动源目录', () => {
   const home = tmp();
   const r = run(oldDir, home);
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /lessons=2 cards=5 nodes=4 edges=1 groups=1 annotations=1 routes=1 versions=1 events=2/);
+  assert.equal(r.stdout, 'lessons=2 cards=6 nodes=4 edges=1 groups=1 annotations=1 routes=1 versions=1 events=2\n'); // 卡片数是输出课程的，含备忘卡
+  assert.match(r.stdout, /lessons=2 cards=6 nodes=4 edges=1 groups=1 annotations=1 routes=1 versions=1 events=2/);
   assert.deepEqual(readDataFile(path.join(home, 'old-interview/course-data.js'), 'LEARN_COURSE'), JSON.parse(JSON.stringify(out)));
   assert.deepEqual(readDataFile(path.join(home, 'index-data.js'), 'LEARN_INDEX').courses, [{ slug: 'old-interview', dir: 'old-interview' }]);
   assert.ok(existsSync(path.join(home, 'old-interview/course.html')));
@@ -407,4 +454,48 @@ test('命令行：旧课程里有小数位置（旧格式允许）时能迁移�
   const nodes = readDataFile(path.join(home, 'old-interview/course-data.js'), 'LEARN_COURSE').growth[0].nodes;
   assert.equal(nodes[3].row, 2.5);
   assert.equal(nodes[3].col, 2);
+});
+
+// ---- 整体审查后的修复：课程目录只接受绝对路径（D1）、写入失败的清理（D4） ----
+
+test('命令行：课程目录为空、是相对路径或含没替换的占位符：退出 1，当前目录里什么都不建', () => {
+  const cwd = tmp();
+  for (const home of ['', 'rel/dir', './courses', '${user_config.courses_dir}', `${cwd}/\${user_config.courses_dir}`]) {
+    const r = spawnSync(process.execPath, [script, oldDir, home], { encoding: 'utf8', cwd });
+    assert.equal(r.status, 1, home);
+    assert.match(r.stderr, /^✗ /, home);
+    assert.equal(r.stdout, '', home);
+  }
+  assert.deepEqual(readdirSync(cwd), []);
+});
+
+test('命令行：旧课程目录可以是相对路径', () => {
+  const home = path.join(tmp(), 'courses');
+  const r = spawnSync(process.execPath, [script, 'tests/fixtures/old-interview', home], { encoding: 'utf8', cwd: ROOT });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(path.join(home, 'old-interview/course-data.js')));
+});
+
+test('写入失败：随课程目录一起新建的上级目录也删掉，原来就有的上级目录保留', () => {
+  const fail = { write() { throw new Error('磁盘满了'); } };
+  const base = tmp();
+  writeFileSync(path.join(base, 'keep.txt'), 'x');
+  assert.throws(() => migrateCourse(oldDir, path.join(base, 'a', 'b', 'courses'), fail), /磁盘满了/);
+  assert.deepEqual(readdirSync(base), ['keep.txt']);
+});
+
+test('写入失败后清理也出错：报出的仍是原来的错误，清理错误附在后面', () => {
+  const home = path.join(tmp(), 'courses');
+  const removed = [];
+  const opts = {
+    write() { throw new Error('磁盘满了'); },
+    remove(p, o) { removed.push(p); throw new Error('权限不够'); },
+  };
+  assert.throws(() => migrateCourse(oldDir, home, opts), (e) => {
+    assert.ok(e instanceof MigrateError);
+    assert.match(e.message, /^写入失败：磁盘满了/);
+    assert.match(e.message, /清理时出错.*权限不够/);
+    return true;
+  });
+  assert.ok(removed.length > 0);
 });

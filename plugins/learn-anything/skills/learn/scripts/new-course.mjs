@@ -2,10 +2,12 @@
 // 用法：node new-course.mjs <courses_dir> <slug>
 // 建课程目录，复制 course.html；index.html 不存在时复制；把课程登记进 index-data.js。不写 course-data.js。
 // 成功时 stdout 只有课程页的绝对路径。
-// 退出码：0 成功，1 slug 不合法、目录已存在、index-data.js 读不懂或写入失败，2 参数不对。
+// 课程目录必须是绝对路径；空值、相对路径和没被替换的 ${…} 占位符一律拒绝，不建任何东西。
+// 退出码：0 成功，1 课程目录或 slug 不合法、目录已存在、index-data.js 读不懂或写入失败，2 参数不对。
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { coursesDirProblem } from './lib/course-index.mjs';
 import { readDataFile, writeDataFile } from './lib/data-file.mjs';
 
 const ASSETS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets');
@@ -30,7 +32,24 @@ function loadIndex(file) {
   return data;
 }
 
-export function createCourse(coursesDir, slug) {
+// 失败后按倒序删掉这次运行创建的东西。删除本身出错时，把这些错误附在原来的错误后面，原来的错误仍是抛出的那个
+export function rollback(error, paths, remove = rmSync) {
+  const problems = [];
+  for (const p of [...paths].reverse()) {
+    try {
+      remove(p, { recursive: true, force: true });
+    } catch (e) {
+      problems.push(`${p}：${e.message}`);
+    }
+  }
+  if (problems.length > 0) error.message += `（清理时出错，需要手工删除：${problems.join('；')}）`;
+  return error;
+}
+
+// writeIndex、remove 只供测试注入失败
+export function createCourse(coursesDir, slug, { writeIndex = writeDataFile, remove = rmSync } = {}) {
+  const problem = coursesDirProblem(coursesDir);
+  if (problem) throw fail('courses-dir', problem);
   if (typeof slug !== 'string' || !SLUG.test(slug)) {
     throw fail('slug', `课程名 "${slug}" 不合法：只能用小写字母、数字和连字符，如 macro-intro`);
   }
@@ -50,7 +69,7 @@ export function createCourse(coursesDir, slug) {
 
   // 记下这次运行创建的东西，失败时只清掉它们
   const createdHome = mkdirSync(home, { recursive: true }); // 返回新建的最外层目录，没建则 undefined
-  const undo = [];
+  const undo = createdHome ? [createdHome] : [];
   try {
     try {
       mkdirSync(dir);
@@ -65,11 +84,9 @@ export function createCourse(coursesDir, slug) {
       copyFileSync(indexTemplate, indexPageFile);
     }
     if (!index.courses.some((c) => c && c.slug === slug)) index.courses.push({ slug, dir: slug });
-    writeDataFile(indexFile, 'LEARN_INDEX', index);
+    writeIndex(indexFile, 'LEARN_INDEX', index);
   } catch (e) {
-    for (const p of undo.reverse()) rmSync(p, { recursive: true, force: true });
-    if (createdHome) rmSync(createdHome, { recursive: true, force: true });
-    throw e;
+    throw rollback(e, undo, remove);
   }
   return { dir, coursePage };
 }
