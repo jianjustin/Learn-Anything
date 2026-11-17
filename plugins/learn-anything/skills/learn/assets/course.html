@@ -596,6 +596,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         requireStr(ctx, ip, it, 'q');
         ['rubric', 'answer', 'yours', 'why'].forEach(function (k) { optionalStr(ctx, ip, it, k); });
         if (it.ok !== undefined && typeof it.ok !== 'boolean') ctx.errors.push(ip + '.ok 应为布尔值');
+        if (it.skipped !== undefined && typeof it.skipped !== 'boolean') ctx.errors.push(ip + '.skipped 应为布尔值');
       });
     },
     table: function (ctx, p, c) {
@@ -1396,12 +1397,14 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         head.appendChild(rich('div', 'pr-q', it.q));
         var stateTag = it.ok === true ? tag('tag-ok', '答对')
           : it.ok === false ? tag('tag-miss', '没掌握')
+          : it.skipped === true ? tag('tag-skipped', '已跳过')
           : str(it.yours) ? tag('tag-pending', '未评')
           : tag('tag-pending', '待作答');
         stateTag.classList.add('pr-state');
         head.appendChild(stateTag);
         li.appendChild(head);
-        if (str(it.rubric)) li.appendChild(field('评分标准', it.rubric));
+        // 评分标准发题时就写进数据，但学习者作答或跳过之前不显示，免得检验变成照着答
+        if (str(it.rubric) && (str(it.yours) || it.skipped === true)) li.appendChild(field('评分标准', it.rubric));
         if (str(it.yours)) li.appendChild(field('你的回答', it.yours));
         if (str(it.why)) li.appendChild(field('缺口', it.why, 'why'));
         if (str(it.answer)) li.appendChild(field('参考答案', it.answer));

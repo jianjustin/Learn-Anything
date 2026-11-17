@@ -32,6 +32,7 @@ for (const [name, mutate, re] of [
   ['资料 kind 非法', (d) => { d.resources = [{ id: 'r', kind: 'blog', title: 't', note: 'n' }]; }, /kind/],
   ['卡片缺必需字段', (d) => { d.lessons[0].cards = [{ type: 'points' }]; }, /points/],
   ['practice 条目缺 q', (d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ yours: 'x' }] }]; }, /practice/],
+  ['practice 条目的 skipped 不是布尔', (d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ q: 'x', skipped: 'yes' }] }]; }, /skipped/],
   ['面板 kind 非法', (d) => { d.growth = [{ kind: 'architecture', title: 't' }]; }, /kind/],
   ['since 引用不存在的课', (d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 1, row: 1, since: 'nope' }]); }, /since/],
   ['until 不在 since 之后', (d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 1, row: 1, since: 'second', until: 'first' }]); }, /until/],
@@ -50,6 +51,10 @@ test('警告：未知卡片类型', () => {
   const r = bad((d) => { d.lessons[0].cards = [{ type: 'mystery', foo: 1 }]; });
   assert.deepEqual(r.errors, []);
   assert.match(r.warnings.join('\n'), /mystery/);
+});
+
+test('practice 条目可以标 skipped: true', () => {
+  assert.deepEqual(bad((d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ q: 'x', rubric: 'r', skipped: true }] }]; }).errors, []);
 });
 
 test('待回顾条目的 lesson 可以是 null', () => {

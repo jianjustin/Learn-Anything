@@ -9,6 +9,9 @@ import { loadCore, loadFixture } from '../helpers/load-core.mjs';
 const C = loadCore();
 const allCards = loadFixture('all-cards');
 const bookTitle = allCards.resources.find((r) => r.id === 'book-a').title;
+const corePractice = (d) => d.lessons.find((l) => l.id === 'core').cards.find((c) => c.type === 'practice');
+const rubricOfFirstItem = corePractice(allCards).items[0].rubric;
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const whyText = allCards.lessons.find((l) => l.id === 'core').cards.find((c) => c.type === 'practice').items[1].why;
 
 let launched;
@@ -199,6 +202,29 @@ test('B9 练习卡：未作答时不显示参考答案，没掌握时显示缺�
   assert.doesNotMatch(await items.nth(0).innerText(), /参考答案/);
   assert.match(await items.nth(1).innerText(), /参考答案/);
   assert.match(await items.nth(1).innerText(), new RegExp(whyText));
+});
+
+test('B9b 练习卡：作答之前不显示评分标准，作答或跳过之后显示', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  await showLesson(page, 'core');
+  const items = page.locator('.card[data-type="practice"] li');
+  const rubricRe = new RegExp(escapeRe(rubricOfFirstItem));
+  assert.doesNotMatch(await items.nth(0).innerText(), /评分标准/);
+  assert.doesNotMatch(await items.nth(0).innerText(), rubricRe);
+  assert.match(await items.nth(1).innerText(), /评分标准/);
+
+  rewriteData(file, (d) => { corePractice(d).items[0].skipped = true; });
+  await eventually(async () => /已跳过/.test(await items.nth(0).innerText()), { message: '跳过的题没有显示已跳过' });
+  assert.match(await items.nth(0).innerText(), /评分标准/);
+  assert.match(await items.nth(0).innerText(), rubricRe);
+  assert.doesNotMatch(await items.nth(0).innerText(), /待作答|没掌握/);
+
+  rewriteData(file, (d) => { const it = corePractice(d).items[0]; delete it.skipped; it.yours = '我的回答'; });
+  await eventually(async () => /我的回答/.test(await items.nth(0).innerText()), { message: '作答后页面没有更新' });
+  assert.match(await items.nth(0).innerText(), /评分标准/);
+  assert.match(await items.nth(0).innerText(), rubricRe);
 });
 
 test('B10 notice 提示条', async (t) => {

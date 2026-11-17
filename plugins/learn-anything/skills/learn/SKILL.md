@@ -28,31 +28,33 @@ allowed-tools:
 ```text
 <课程目录>/
 ├── index.html          # 总览页，建课脚本从 assets/index.html 复制，不修改
-├── index-data.js       # 课程登记表，只由建课脚本写
-└── <slug>/
+├── index-data.js       # 课程登记表 {"courses": [{"slug", "dir"}]}，只由建课脚本写
+└── <dir>/              # 每门课一个子目录，名字取登记项的 dir；新建的课 dir 与 slug 相同
     ├── course.html     # 课程页，建课脚本从 assets/course.html 复制，不修改
     └── course-data.js  # 你持续编辑的唯一文件，也是进度的唯一来源
 ```
 
-两条命令（`<slug>` 换成课程的 slug）：
+一门课的文件一律按 `<课程目录>/<dir>/` 找，`<dir>` 取 `index-data.js` 里这门课登记项的 `dir`，不要用 slug 拼路径：迁移来的课两者可能不同。
 
-- 建课：`node ${CLAUDE_SKILL_DIR}/scripts/new-course.mjs "${user_config.courses_dir}" <slug>`。建目录、复制页面、登记进 `index-data.js`，成功时只输出课程页的绝对路径。slug 不合法或目录已存在时退出码 1。它不写 `course-data.js`。
-- 校验：`node ${CLAUDE_SKILL_DIR}/scripts/validate.mjs "${user_config.courses_dir}/<slug>/course-data.js"`。退出码 0 通过（可能带 △ 警告），1 有 ✗ 错误，2 参数不对。
+两条命令：
+
+- 建课：`node ${CLAUDE_SKILL_DIR}/scripts/new-course.mjs "${user_config.courses_dir}" <slug>`。建目录（`dir` 等于 slug）、复制页面、登记进 `index-data.js`，成功时只输出课程页的绝对路径。它不写 `course-data.js`。退出码 1 时读 ✗ 后面的信息：slug 不合法就改 slug；课程目录已存在就换一个 slug 并告诉学习者；其他错误（比如 `index-data.js` 读不懂或写不进去）就停下，把信息原样告诉学习者，不要手改 `index-data.js`，也不要反复换 slug 重试。
+- 校验：`node ${CLAUDE_SKILL_DIR}/scripts/validate.mjs "${user_config.courses_dir}/<dir>/course-data.js"`。退出码 0 通过（可能带 △ 警告），1 有 ✗ 错误，2 参数不对。
 
 ## 什么时候读 references
 
 | 时机 | 读什么 |
 |---|---|
 | 开题之前 | `references/kickoff.md`：两个开题问题、调研任务书、`researched` 取哪个值、怎么定上法、大纲格式、slug 规则、把调研报告变成课程数据 |
-| 第一次写或改 `course-data.js` 之前 | `references/data-format.md`：全部字段、卡片、生长面板、校验规则、各阶段的写入清单、完整示例 |
-| 开始讲第一课之前；出题、评分、续学回顾、调整大纲时拿不准 | `references/lesson-guide.md`：分段、插话、检验形式、评分标准、调用评分子代理、课末、回顾、调整大纲 |
+| 每个会话第一次写或改 `course-data.js` 之前（新建的课和续学的课都算） | `references/data-format.md`：全部字段、卡片、生长面板、校验规则、各阶段的写入清单、完整示例 |
+| 每个会话开始讲课之前（新开课和续学都算） | `references/lesson-guide.md`：分段、插话、检验形式、评分标准、调用评分子代理的提示格式、课末、回顾、调整大纲 |
 | 课程套用了领域模板 | 该模板的 `templates/<name>/TEMPLATE.md` 正文，见「领域模板」 |
 
-同一个会话里读过的不必重读。
+同一个会话里读过的不必重读；换了新会话要重新读，上一个会话读过的内容不在你的上下文里。
 
 ## 入口
 
-先读 `${user_config.courses_dir}/index-data.js`，再读其中登记的每门课的 `course-data.js`，得到主题和进度。课程目录或登记表不存在时，就是还没有课。
+先读 `${user_config.courses_dir}/index-data.js`，再按每个登记项的 `dir` 读 `<课程目录>/<dir>/course-data.js`，得到主题和进度。课程目录或登记表不存在时，就是还没有课。
 
 - **带主题**（「我想学 xx」）：找有没有相同或相近主题的课。有就用 `AskUserQuestion` 问：续学这门、重开这门、还是另开一门新课。续学进入「续学与回顾」；另开进入「开题」；重开会清掉这门课的全部进度，先说明这一点并得到确认，再从「开题」走起，最后在原目录里重写 `course-data.js`（目录已存在，不再运行建课脚本）。没有相近的课就直接「开题」。
 - **不带主题，或只说「继续学习」**：在对话里列出全部课程，每门一行：主题、已讲几课 / 共几课、已掌握几课、待回顾几条、断点说明。然后用 `AskUserQuestion` 让学习者选（选项最多四个：最近更新的至多三门课各一个，再加一个「开新课」）；课更多时，学习者可以直接打出课名。没有任何课时，问学习者想学什么。
@@ -71,23 +73,23 @@ allowed-tools:
 
 ## 每课的讲解与检验
 
-讲第一课之前先读 `references/lesson-guide.md`，写数据时对照 data-format.md 里对应阶段的写入清单。
+开始讲课之前先读 `references/lesson-guide.md` 和 `references/data-format.md`（本会话已读过的除外），写数据时对照 data-format.md 里对应阶段的写入清单。
 
 1. **开课先改页面**：本课设为 `current`，写入本课的生长增量，更新 `resume`。页面几秒内自动刷新。然后用一两句话说这课解决什么问题、和上一课什么关系。
 2. **分段讲**：每段只讲一个点，约 300 字以内，段末停下等学习者。学习者说「直接讲完这课」时连续讲完，但仍按段组织，内容在对话里讲出来。
 3. **插话先回答**。偏离本课的简要回答，并说明放到后面哪一课，或记进待回顾。问过的问题课末写进 `questions` 卡。
 4. **每讲完一段**更新 `resume.note` 和 `updatedAt`，中途断开也能接上。
-5. **每课至少检验一次**，形式按主题定。发题时把题目和评分标准写进本课的 `practice` 卡，**不写参考答案**，然后停下等作答。作答后评分：主观作答交给 `learn-anything:answer-grader` 子代理，客观题和能直接运行验证的练习当场判，学习者说「直接评」时自己对照评分标准判。评完补全这一条的 `yours`、`ok`、`why`、`answer`。表现出掌握就把本课 `mastered` 设为 `true`；否则往 `review` 加一条，写明缺口。
-6. **学习者说「跳过」**：这次检验不做，`mastered` 保持 `false`，不加待回顾。
+5. **每课至少检验一次**，形式按主题定。发题时把题目和评分标准写进本课的 `practice` 卡，**不写参考答案**，然后停下等作答。作答后评分：主观作答交给 `learn-anything:answer-grader` 子代理，客观题和能直接运行验证的练习当场判，学习者说「直接评」时自己对照评分标准判。评完补全这一条的 `yours`、`ok`、`why`、`answer`。这一条通过，并且 `review` 里没有指向本课的条目：本课 `mastered` 设为 `true`。这一条没通过：往 `review` 末尾加一条写明缺口，并把本课 `mastered` 设为 `false`。
+6. **学习者说「跳过」**：题目已经发出的，把这一条记为 `skipped: true`，不写 `yours` 和 `ok`；还没发题就没有条目要记。跳过不算掌握，不改 `mastered`，不加待回顾。
 7. **课末**：对话里给 3–5 条小结；写入本课卡片，至少有 `points` 和 `quote`；本课设为 `done`，下一课设为 `current`，`resume` 指向下一课；告诉学习者页面已更新，问是否进入下一课。
 
 讲完就推进：检验没通过也照常进入下一课，缺口交给待回顾。
 
 ## 续学与回顾
 
-1. 读这门课的 `course-data.js`，用两三句话回顾学到哪、上次讲到什么，并再给一次课程页的绝对路径。只依据文件，不依赖会话历史。课程套用了模板时，先读模板正文。
+1. 先读 `references/lesson-guide.md` 和 `references/data-format.md`：续学的会话同样要出题、调用评分子代理、改数据，提示格式和写入清单都在里面。课程套用了模板时，再读模板正文。然后读这门课的 `course-data.js`，用两三句话回顾学到哪、上次讲到什么，并再给一次课程页的绝对路径。只依据文件，不依赖会话历史。
 2. `review` 不为空时先回顾：取最早的一两条，让学习者凭记忆回答。答上来就删掉这一条，对应的课没有别的待回顾条目时把它的 `mastered` 设为 `true`；没答上来就简要重讲，条目保留。学习者说「跳过回顾」时直接继续。
-3. 从断点继续。本课有已发出但还没作答的检验时，把题目原样再发一次。`resume.lesson` 那一课已经是 `done` 时，从下一课开课。
+3. 从断点继续。本课 `practice` 里既没有 `yours` 也没有 `skipped` 的条目，是发出后还没作答的题，把题目原样再发一次；记了 `skipped: true` 的题不再发。`resume.lesson` 那一课已经是 `done` 时，从下一课开课。
 
 细节见 lesson-guide.md 的「续学回顾」。
 
@@ -131,6 +133,7 @@ allowed-tools:
 | 讲过就记成已掌握 | `mastered` 只在检验里表现出掌握时设为 `true` |
 | 发题时把参考答案写进 `practice` 卡 | 发题只写题目和评分标准，评分后才写 `answer`，页面会显示它 |
 | 转述或润色学习者的回答再交给评分子代理 | 原话一字不改，`yours` 也写原话 |
+| 跳过的题只是不写 `ok`，下次续学又被当成未作答重发一遍 | 发出后跳过的题记 `skipped: true`；续学只重发既没有 `yours` 也没有 `skipped` 的题 |
 | 检验没通过就卡在这一课 | 缺口写进 `review`，照常推进 |
 | 给凭自己知识写的卡片挂上 `refs` 显得有出处 | `refs` 只写这张卡片内容真正出自的资料；没有就不写，页面会如实标「未核对」 |
 | 把没核实过的书和章节写进资料清单和延伸阅读 | 按 kickoff.md 的规则处理核实情况，「未核实」一节的内容只在对话里提 |

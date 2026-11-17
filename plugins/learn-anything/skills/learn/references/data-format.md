@@ -1,6 +1,6 @@
 # course-data.js 数据格式
 
-`<课程目录>/<slug>/course-data.js` 是一门课的全部内容和进度。课程页 `course.html` 每 2.5 秒重新加载它，内容变了就重新渲染；数据有错时页面显示红框，保留上一次成功的内容，修好后自动恢复。校验规则只有一份，写在 `course.html` 里，页面和校验脚本共用，见第 9 节。
+`<课程目录>/<dir>/course-data.js` 是一门课（`<dir>` 取 `index-data.js` 里这门课登记项的 `dir`，新建的课等于 slug）的全部内容和进度。课程页 `course.html` 每 2.5 秒重新加载它，内容变了就重新渲染；数据有错时页面显示红框，保留上一次成功的内容，修好后自动恢复。校验规则只有一份，写在 `course.html` 里，页面和校验脚本共用，见第 9 节。
 
 ## 1. 文件形态
 
@@ -46,8 +46,10 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 ## 4. resources：资料清单
 
 ```js
-{ "id": "mankiw-macro", "kind": "book", "title": "《宏观经济学》", "author": "N. Gregory Mankiw", "note": "标准入门教材，每课后对照相应章节读" }
+{ "id": "sample-macro", "kind": "book", "title": "《示例宏观经济学教材》", "author": "示例作者", "note": "标准入门教材，每课后对照相应章节读" }
 ```
+
+本文所有示例里的资料都是虚构的，只演示格式。
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
@@ -56,7 +58,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | `title` | 是 | 资料名 |
 | `author` | 否 | 个人或机构 |
 | `url` | 否 | 只写实际访问过的网址；`http(s)` 链接在页面上可以点开 |
-| `note` | 是 | 这份资料覆盖什么、什么时候看。核实情况的后缀（「（章节未核对）」「（未能核实）」）加在末尾，规则见 kickoff.md |
+| `note` | 是 | 这份资料覆盖什么、什么时候看。核实情况的后缀加在末尾：调研报告标「仅核实存在」的加「（章节未核对）」；学习者指定但没能核实的，以及 `researched` 为 `"no"` 或 `"skipped"` 时列入的每一份资料，加「（未能核实）」。规则见 kickoff.md |
 
 ## 5. review：待回顾
 
@@ -77,7 +79,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
   "summary": "央行怎样通过利率影响经济，加息为什么会压低股价",
   "status": "current",
   "mastered": false,
-  "readings": [{ "resource": "mankiw-macro", "where": "第 15 章" }],
+  "readings": [{ "resource": "sample-macro", "where": "第 15 章" }],
   "cards": []
 }
 ```
@@ -89,7 +91,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | `optional` | 否 | `true` 时显示「可选」 |
 | `status` | 是 | `todo`、`current`、`done`、`skipped`；同一时间最多一个 `current` |
 | `mastered` | 是 | 布尔。只有检验中表现出掌握才为 `true`；页面把「已讲」和「已掌握」分开显示 |
-| `readings` | 是 | 延伸阅读：`[{ "resource": "<资料 id>", "where": "第 3 章第 2 节" }]`，可以为空。章节没核对的 `where` 写「章节未核对」，整份资料都要看的写「全文」 |
+| `readings` | 是 | 延伸阅读：`[{ "resource": "<资料 id>", "where": "第 3 章第 2 节" }]`，可以为空。章节号只能来自核对过的目录：章节没核对的，以及 `researched` 为 `"no"` 或 `"skipped"` 时的每一份，`where` 都写「章节未核对」；整份资料都要看、目录也核对过的写「全文」 |
 | `cards` | 是 | 卡片数组；`todo` 的课为空数组 |
 
 ### 卡片
@@ -121,13 +123,14 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `q` | 是 | 题目全文 |
-| `rubric` | 主观题必填 | 评分标准，发题时就写好 |
+| `rubric` | 主观题必填 | 评分标准，发题时就写好。页面在这一条有 `yours` 或 `skipped: true` 之前不显示它 |
 | `answer` | 否 | 参考答案。学习者作答之前不写，因为页面会显示它 |
 | `yours` | 否 | 学习者的原话，一字不改 |
 | `ok` | 否 | `true` 或 `false`；跳过的题省略 |
+| `skipped` | 否 | `true` 表示题目发出后学习者选择跳过；跳过的题不写 `yours` 和 `ok` |
 | `why` | 否 | 没掌握时写缺口在哪 |
 
-页面按这些字段显示状态：有 `ok` 显示「答对」或「没掌握」；没有 `ok` 但有 `yours` 显示「未评」；都没有显示「待作答」。
+页面按这些字段显示状态：有 `ok` 显示「答对」或「没掌握」；`skipped: true` 显示「已跳过」；没有 `ok` 但有 `yours` 显示「未评」；都没有显示「待作答」。既没有 `yours` 也没有 `skipped` 的条目，就是发出后还没作答的题，续学时原样重发。
 
 ## 7. growth：生长面板
 
@@ -219,12 +222,16 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 
 ### 发题
 
-往本课 `cards` 里的 `practice` 卡追加一条 `{ "q", "rubric" }`；本课还没有 `practice` 卡就新建一张。不写 `answer`。
+往本课 `cards` 里的 `practice` 卡追加一条 `{ "q", "rubric" }`；本课还没有 `practice` 卡就新建一张。不写 `answer`：页面一有 `answer` 就显示。`rubric` 在作答前不会显示，可以放心写。
 
 ### 评分
 
-1. 补全这一条的 `yours`、`ok`、`answer`，没掌握时写 `why`。跳过的题不写 `ok`。
-2. 本课所有评过的条目都通过：`mastered: true`。有没通过的：往 `review` 末尾加 `{ "lesson": "<本课 id>", "text": "<缺口>" }`，`mastered` 保持 `false`。
+1. 补全这一条的 `yours`、`ok`、`answer`，没掌握时写 `why`。
+2. 只按这一条处理：这一条通过，并且 `review` 里没有指向本课的条目：本课 `mastered: true`。这一条没通过：往 `review` 末尾加 `{ "lesson": "<本课 id>", "text": "<缺口>" }`，并把本课 `mastered` 设为 `false`。
+
+### 跳过
+
+学习者说「跳过」：题目已经发出的，把这一条记为 `skipped: true`，不写 `yours` 和 `ok`；还没发题就没有条目要记。跳过不算掌握，不改 `mastered`，不加待回顾。
 
 ### 课末
 
@@ -334,7 +341,7 @@ window.LEARN_COURSE = {
 
 ### 示例二：学到一半的课
 
-经过调研、启用了 `diagram` 面板，讲完两课：第一课掌握了，第二课检验没通过、留下一条待回顾；第三课刚开课，已经发出一道题还没作答。
+经过调研、启用了 `diagram` 面板，讲完两课：第一课掌握了（第二道题学习者选择跳过），第二课检验没通过、留下一条待回顾；第三课刚开课，已经发出一道题还没作答。
 
 ```js
 window.LEARN_COURSE = {
@@ -351,19 +358,19 @@ window.LEARN_COURSE = {
   "researched": "yes",
   "resources": [
     {
-      "id": "mankiw-macro",
+      "id": "sample-macro",
       "kind": "book",
-      "title": "《宏观经济学》",
-      "author": "N. Gregory Mankiw",
+      "title": "《示例宏观经济学教材》",
+      "author": "示例作者",
       "note": "标准入门教材，每课后对照相应章节读"
     },
     {
-      "id": "fed-policy",
+      "id": "sample-cb-guide",
       "kind": "doc",
-      "title": "Monetary Policy",
-      "author": "Federal Reserve",
-      "url": "https://www.federalreserve.gov/monetarypolicy.htm",
-      "note": "美联储对自身政策工具的官方说明，讲货币政策时翻阅（章节未核对）"
+      "title": "示例央行政策说明",
+      "author": "示例央行",
+      "url": "https://example.com/monetary-policy",
+      "note": "央行对自身政策工具的说明，讲货币政策时翻阅（章节未核对）"
     }
   ],
   "updatedAt": "2026-11-17T21:05:00+08:00",
@@ -406,7 +413,7 @@ window.LEARN_COURSE = {
       "summary": "支出法、收入法、生产法，名义 GDP 和实际 GDP",
       "status": "done",
       "mastered": true,
-      "readings": [{ "resource": "mankiw-macro", "where": "第 2 章" }],
+      "readings": [{ "resource": "sample-macro", "where": "第 2 章" }],
       "cards": [
         {
           "type": "points",
@@ -414,7 +421,7 @@ window.LEARN_COURSE = {
             "支出法：GDP = 消费 + 投资 + 政府购买 + 净出口",
             "**实际 GDP** 用基年价格计算，剔除了物价变化，才能比较不同年份的产出"
           ],
-          "refs": ["mankiw-macro"]
+          "refs": ["sample-macro"]
         },
         {
           "type": "practice",
@@ -425,6 +432,11 @@ window.LEARN_COURSE = {
               "yours": "大概 3%，因为有 5% 是涨价涨出来的，东西其实没多那么多",
               "ok": true,
               "answer": "约 3%。名义 GDP 的增长 = 产出增长 + 物价上涨，扣掉 5% 的物价因素，产出只多了约 3%，所以比较不同年份要看实际 GDP。"
+            },
+            {
+              "q": "用支出法列出 GDP 的四个组成部分，各举一个例子。",
+              "rubric": "四个部分都答到：消费、投资、政府购买、净出口，每个部分的例子归类正确",
+              "skipped": true
             }
           ]
         },
@@ -437,7 +449,7 @@ window.LEARN_COURSE = {
       "summary": "通胀的成因、CPI 的算法，以及通胀预期",
       "status": "done",
       "mastered": false,
-      "readings": [{ "resource": "mankiw-macro", "where": "第 5 章" }],
+      "readings": [{ "resource": "sample-macro", "where": "第 5 章" }],
       "cards": [
         {
           "type": "points",
@@ -476,8 +488,8 @@ window.LEARN_COURSE = {
       "status": "current",
       "mastered": false,
       "readings": [
-        { "resource": "mankiw-macro", "where": "第 15 章" },
-        { "resource": "fed-policy", "where": "章节未核对" }
+        { "resource": "sample-macro", "where": "第 15 章" },
+        { "resource": "sample-cb-guide", "where": "章节未核对" }
       ],
       "cards": [
         {
@@ -497,7 +509,7 @@ window.LEARN_COURSE = {
       "summary": "政府支出和税收怎样影响总需求，乘数效应",
       "status": "todo",
       "mastered": false,
-      "readings": [{ "resource": "mankiw-macro", "where": "章节未核对" }],
+      "readings": [{ "resource": "sample-macro", "where": "章节未核对" }],
       "cards": []
     },
     {
