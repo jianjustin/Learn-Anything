@@ -1,0 +1,16 @@
+{
+  "name": "learn-anything-local",
+  "owner": {
+    "name": "jianjustin"
+  },
+  "metadata": {
+    "description": "learn-anything 本地 marketplace：系统学习任意主题的课程插件。"
+  },
+  "plugins": [
+    {
+      "name": "learn-anything",
+      "source": "./plugins/learn-anything",
+      "description": "系统学习任意主题的课程插件"
+    }
+  ]
+}

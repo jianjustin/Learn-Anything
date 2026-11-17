@@ -1,0 +1,16 @@
+{
+  "name": "learn-anything",
+  "version": "0.1.0",
+  "description": "系统学习任意主题：调研生成课程大纲，逐课讲授并出题，用离线课程页和总览页跟踪进度。",
+  "author": {
+    "name": "jianjustin"
+  },
+  "userConfig": {
+    "courses_dir": {
+      "type": "directory",
+      "title": "课程目录",
+      "description": "存放所有课程数据与课程页的目录，每门课一个子目录。",
+      "required": true
+    }
+  }
+}
