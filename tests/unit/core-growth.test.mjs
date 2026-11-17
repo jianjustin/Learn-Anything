@@ -115,3 +115,20 @@ test('addedAt 列出本课新增元素的名字', () => {
   for (const name of ['B', '调用', '组', 'v2']) assert.ok(list.includes(name), name);
   assert.ok(!list.includes('A'));
 });
+
+test('lessons 损坏时 validateCourse 不抛异常，只报错、不算版面警告', () => {
+  const emptyDiagram = { kind: 'diagram', title: 't', nodes: [], edges: [], groups: [], annotations: [], routes: [] };
+  const broken = {
+    'lessons 是字符串': (d) => { d.lessons = 'oops'; },
+    'lessons 缺失': (d) => { delete d.lessons; },
+    'lessons 含 null 项': (d) => { d.lessons.push(null); },
+  };
+  for (const [name, mutate] of Object.entries(broken)) {
+    const d = loadFixture('valid-minimal');
+    d.growth = [emptyDiagram];
+    mutate(d);
+    let r;
+    assert.doesNotThrow(() => { r = plain(C.validateCourse(d, { dirName: 'valid-minimal' })); }, name);
+    assert.ok(r.errors.length > 0, name);
+  }
+});

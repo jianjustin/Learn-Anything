@@ -296,7 +296,7 @@
   }
 
   // 版面警告逐课算一遍再去重；文字里只有节点 id，同一个问题在多课出现只报一次。
-  // 只在 growth 没有错误时算，面板数据有错时 diagramAt 的前提不成立
+  // 只在整份课程没有任何错误时算：lessons 或面板数据有错时，diagramAt 的前提不成立
   function addLayoutWarnings(ctx, d) {
     d.growth.forEach(function (g) {
       if (g.kind !== 'diagram') return;
@@ -348,9 +348,8 @@
         requireStr(ctx, p, r, 'text');
       });
     }
-    var errorsBefore = ctx.errors.length;
     validateGrowth(ctx, d);
-    if (ctx.errors.length === errorsBefore) addLayoutWarnings(ctx, d);
+    if (ctx.errors.length === 0) addLayoutWarnings(ctx, d);
     return { errors: ctx.errors, warnings: ctx.warnings };
   };
 
