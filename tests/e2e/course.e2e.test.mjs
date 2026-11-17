@@ -229,3 +229,50 @@ test('B11 页头、待回顾、资料清单和延伸阅读', async (t) => {
   assert.match(await page.locator('#readings li').innerText(), new RegExp(bookTitle));
   assert.match(await page.locator('#progress').innerText(), /2\s*\/\s*3/);
 });
+
+// 把 wrap 课（打开时正在看的课）的 html 卡换成给定内容，等页面显示出来
+async function showHtmlCard(page, file, html, marker) {
+  rewriteData(file, (d) => {
+    d.lessons.find((l) => l.id === 'wrap').cards.find((c) => c.type === 'html').html = html;
+  });
+  await eventually(async () => (await page.locator('.card[data-type="html"]').innerText()).includes(marker), { message: 'html 卡没有更新' });
+}
+
+test('B12 html 卡里的 id 和 name 一律删掉，覆盖不了 document 上的方法', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  await showHtmlCard(page, file, '<p>clobber</p><img name="getElementById" src="#"><a id="cards" href="#x">链接</a><form name="x"></form>', 'clobber');
+  assert.equal(await page.evaluate(() => typeof document.getElementById), 'function');
+  assert.equal(await page.locator('.card[data-type="html"] [id], .card[data-type="html"] [name]').count(), 0);
+  rewriteData(file, (d) => { d.topic = '覆盖之后的新主题'; });
+  await eventually(async () => (await page.locator('#topic').innerText()) === '覆盖之后的新主题', { message: '自动刷新失效' });
+  await showLesson(page, 'core');
+  assert.equal(await current(page), 'core');
+});
+
+test('B13 html 卡里的 style 和带 url( 的属性被删掉，不产生外部请求', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file, requests } = await open(t, b.browser, 'all-cards');
+  await showHtmlCard(page, file,
+    '<div style="background:\\75rl(http://example.invalid/b.png)">styled</div>' +
+    '<svg width="20" height="20"><rect width="20" height="20" fill="url(http://example.invalid/c.svg)"/>' +
+    '<rect width="20" height="20" mask="u\\72l(http://example.invalid/d.svg)"/></svg>', 'styled');
+  await page.waitForTimeout(500);
+  assert.ok(requests.every((u) => u.startsWith('file:')), requests.join('\n'));
+  assert.equal(await page.locator('.card[data-type="html"] [style], .card[data-type="html"] [fill], .card[data-type="html"] [mask]').count(), 0);
+  assert.equal(await page.locator('.card[data-type="html"] svg rect').count(), 2);
+});
+
+test('B14 渲染和报错路径都抛异常时，轮询也不会停', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, file } = await open(t, b.browser, 'all-cards');
+  // 让页面里所有 $() 调用抛异常，撑过至少一次刷新，再恢复
+  await page.evaluate(() => { document.getElementById = () => { throw new Error('模拟的失效'); }; });
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => { delete document.getElementById; });
+  rewriteData(file, (d) => { d.topic = '恢复之后的新主题'; });
+  await eventually(async () => (await page.locator('#topic').innerText()) === '恢复之后的新主题', { message: '轮询已经停止' });
+});

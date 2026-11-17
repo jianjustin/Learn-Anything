@@ -1157,10 +1157,13 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         var value = node.attributes[j].value;
         var drop = name.indexOf('on') === 0 ||
           URL_ATTRS.indexOf(name) >= 0 ||
+          // id 和 name 一律删：name="getElementById" 这类写法会覆盖 document 上的方法，让整页失效
+          name === 'id' || name === 'name' ||
+          // style 一律删：CSS 转义（\75rl(…)）能绕过任何关键字检查
+          name === 'style' ||
           ((name === 'href' || name === 'src' || name === 'xlink:href') && !safeUrl(value)) ||
-          (name === 'style' && /url\s*\(|image-set|expression\s*\(|@import/i.test(value)) ||
-          // 与页面元素同名的 id 会让 getElementById 找错元素
-          ((name === 'id' || name === 'name') && document.getElementById(value));
+          // SVG 的 fill、mask、filter 等也按 CSS 解析：含 url( 或反斜杠转义的值一律删
+          /\\/.test(value) || /url\(|image-set\(/i.test(value.replace(/[\s\\]+/g, ''));
         if (drop) node.removeAttribute(node.attributes[j].name);
       }
     }
@@ -1647,17 +1650,27 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     state.loading = true;
     state.scriptError = null;
     window.LEARN_COURSE = undefined;
-    var s = document.createElement('script');
-    s.src = DATA_FILE + '?t=' + Date.now();
+    var s;
+    // 不管渲染和报错路径上出了什么事，都要放开 loading，否则之后的轮询全被挡住
     function finish(ok) {
-      s.onload = s.onerror = null;
-      s.remove();
-      try { received(ok); } catch (e) { state.renderError = e.message; renderStatus(); }
-      state.loading = false;
+      try {
+        s.onload = s.onerror = null;
+        s.remove();
+        try { received(ok); } catch (e) { state.renderError = e.message; renderStatus(); }
+      } finally {
+        state.loading = false;
+      }
     }
-    s.onload = function () { finish(true); };
-    s.onerror = function () { finish(false); };
-    document.head.appendChild(s);
+    try {
+      s = document.createElement('script');
+      s.src = DATA_FILE + '?t=' + Date.now();
+      s.onload = function () { finish(true); };
+      s.onerror = function () { finish(false); };
+      document.head.appendChild(s);
+    } catch (e) {
+      state.loading = false;
+      throw e;
+    }
   }
 
   load();
