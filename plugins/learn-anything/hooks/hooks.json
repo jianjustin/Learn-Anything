@@ -1,0 +1,21 @@
+{
+  "description": "新会话开始时，提醒各课程里还没解决的待回顾条目（每天最多一次）。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/skills/learn/scripts/review-reminder.mjs",
+              "${user_config.courses_dir}"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
