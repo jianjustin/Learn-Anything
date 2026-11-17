@@ -935,37 +935,80 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     return false;
   }
 
-  // 直线穿过了别的节点时换一条：同行的从上方（第一行从下方）的行间空隙绕过去，同列的从右侧的列间空隙绕过去。
-  // 绕行路线本身也被挡住时保留直线
-  function routeEdge(a, b, blockers) {
-    var pts = edgePoints(a, b);
-    if (pts.length !== 2 || !pathHits(pts, blockers)) return pts;
-    var g = core.GRID, alt;
-    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2;
-    if (pts[0].y === pts[1].y) {
-      var up = a.y - MARGIN >= (g.rowH - g.nodeH) / 2;
-      var gy = up ? Math.min(a.y, b.y) - (g.rowH - g.nodeH) / 2 : Math.max(a.y + a.h, b.y + b.h) + (g.rowH - g.nodeH) / 2;
-      var ay = up ? a.y : a.y + a.h, by = up ? b.y : b.y + b.h;
-      alt = [{ x: acx, y: ay }, { x: acx, y: gy }, { x: bcx, y: gy }, { x: bcx, y: by }];
-    } else {
-      var gx = Math.max(a.x + a.w, b.x + b.w) + (g.colW - g.nodeW) / 2;
-      var aY = a.y + a.h / 2, bY = b.y + b.h / 2;
-      alt = [{ x: a.x + a.w, y: aY }, { x: gx, y: aY }, { x: gx, y: bY }, { x: b.x + b.w, y: bY }];
-    }
-    return pathHits(alt, blockers) ? pts : alt;
+  // 绕行线在行间空隙里走的位置，按离节点边的距离：先走空隙正中，被标注挡住时走到 3 条标注的下方
+  var LANES_BELOW = [45, 70];
+  var LANES_ABOVE = [45, 20];
+  var LABEL_BELOW = 20;   // 往下绕的线，页面把标签画在线下 16px，再留一点给字的下沿
+  var SIDE_GAP = 24;      // 列间空隙的一半
+
+  // 标注文字所占的框：12px 字，汉字按 12px、其他字符按 7px 估宽，高一行
+  function annotationRect(a) {
+    var wide = a.text.replace(/[\u0000-ÿ]/g, '').length;
+    return { x: a.x, y: a.y, w: wide * 12 + (a.text.length - wide) * 7, h: ANNOT_LINE };
   }
 
-  // 画布大小按面板里所有节点算，不随课程变化，逐课播放时图不会缩放跳动
+  // 同一行、中间至少隔着一列的两个节点之间的连线可能要绕行
+  function mayDetour(a, b) {
+    return a.y === b.y && Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w) > core.GRID.colW - core.GRID.nodeW;
+  }
+
+  // 直线穿过了别的节点时换一条，候选依次是：
+  //   同行：从上方空隙绕（第一行上方没有空隙，不走）→ 从两端底边往下绕 → 从相对的两侧出来、经列间空隙往下绕；
+  //   同列：经右侧列间空隙绕 → 经左侧列间空隙绕。
+  // 只有直线穿过别的节点才绕行（只压到标注不绕，免得为一行小字把线拉远）；
+  // 每条候选都不能穿过别的节点和当前可见的标注；都不行时保留直线
+  function routeEdge(a, b, nodeBlockers, annotationRects) {
+    var pts = edgePoints(a, b);
+    if (pts.length !== 2 || !pathHits(pts, nodeBlockers)) return pts;
+    var blockers = nodeBlockers.concat(annotationRects);
+    var g = core.GRID, candidates = [];
+    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2;
+    if (pts[0].y === pts[1].y) {
+      if (a.y - MARGIN >= (g.rowH - g.nodeH) / 2) {
+        LANES_ABOVE.forEach(function (d) {
+          var y = a.y - d;
+          candidates.push([{ x: acx, y: a.y }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: b.y }]);
+        });
+      }
+      var bottom = a.y + a.h, dir = a.x < b.x ? 1 : -1;
+      var aSide = dir > 0 ? a.x + a.w : a.x, bSide = dir > 0 ? b.x : b.x + b.w;
+      var ay = a.y + a.h / 2, by = b.y + b.h / 2;
+      LANES_BELOW.forEach(function (d) {
+        var y = bottom + d;
+        candidates.push([{ x: acx, y: bottom }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: bottom }]);
+      });
+      LANES_BELOW.forEach(function (d) {
+        var y = bottom + d, x1 = aSide + dir * SIDE_GAP, x2 = bSide - dir * SIDE_GAP;
+        candidates.push([{ x: aSide, y: ay }, { x: x1, y: ay }, { x: x1, y: y }, { x: x2, y: y }, { x: x2, y: by }, { x: bSide, y: by }]);
+      });
+    } else {
+      var aY = a.y + a.h / 2, bY = b.y + b.h / 2;
+      var gr = Math.max(a.x + a.w, b.x + b.w) + SIDE_GAP, gl = Math.min(a.x, b.x) - SIDE_GAP;
+      candidates.push([{ x: a.x + a.w, y: aY }, { x: gr, y: aY }, { x: gr, y: bY }, { x: b.x + b.w, y: bY }]);
+      candidates.push([{ x: a.x, y: aY }, { x: gl, y: aY }, { x: gl, y: bY }, { x: b.x, y: bY }]);
+    }
+    for (var i = 0; i < candidates.length; i++) if (!pathHits(candidates[i], blockers)) return candidates[i];
+    return pts;
+  }
+
+  // 画布大小按面板里所有节点、标注和连线算，不随课程变化，逐课播放时图不会缩放跳动。
+  // 可能往下绕行的连线，在它那一行下方留出最深一条绕行线和它的标签
   function canvasSize(panel) {
-    var right = 0, bottom = 0, annots = Object.create(null);
+    var right = 0, bottom = 0, annots = Object.create(null), rects = Object.create(null);
     list(panel.annotations).forEach(function (a) { annots[a.node] = (annots[a.node] || 0) + 1; });
     list(panel.nodes).forEach(function (n) {
       var r = nodeRect(n);
+      rects[n.id] = r;
       var below = annots[n.id] ? ANNOT_GAP + annots[n.id] * ANNOT_LINE : 0;
       right = Math.max(right, r.x + r.w);
       bottom = Math.max(bottom, r.y + r.h + below);
     });
-    return { width: right + MARGIN, height: bottom + MARGIN };
+    var height = bottom + MARGIN;
+    list(panel.edges).forEach(function (e) {
+      var a = rects[e.from], b = rects[e.to];
+      if (a && b && mayDetour(a, b)) height = Math.max(height, a.y + a.h + LANES_BELOW[LANES_BELOW.length - 1] + LABEL_BELOW);
+    });
+    return { width: right + MARGIN, height: height };
   }
 
   function diagramWarnings(panel, nodes, annotations) {
@@ -1025,11 +1068,22 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       return { id: n.id, label: n.label, style: n.style || 'box', x: r.x, y: r.y, w: r.w, h: r.h, isNew: fresh(n) };
     });
 
+    // 标注排在节点正下方，y 是该条文字的顶边；同一节点的几条依次往下排
+    var visibleAnnotations = list(panel.annotations).filter(function (a) { return seen(a) && rects[a.node]; });
+    var stacked = Object.create(null);
+    var annotations = visibleAnnotations.map(function (a) {
+      var r = rects[a.node], k = stacked[a.node] || 0;
+      stacked[a.node] = k + 1;
+      return { node: a.node, text: a.text, x: r.x, y: r.y + r.h + ANNOT_GAP + k * ANNOT_LINE, isNew: fresh(a) };
+    });
+
+    // 绕行线要避开当前可见的标注文字
+    var annotationRects = annotations.map(annotationRect);
     var edges = list(panel.edges).filter(function (e) { return seen(e) && rects[e.from] && rects[e.to]; }).map(function (e) {
       var blockers = nodes.filter(function (n) { return n.id !== e.from && n.id !== e.to; });
       return {
         from: e.from, to: e.to, label: e.label || '', style: e.style || 'solid',
-        points: routeEdge(rects[e.from], rects[e.to], blockers), isNew: fresh(e)
+        points: routeEdge(rects[e.from], rects[e.to], blockers, annotationRects), isNew: fresh(e)
       };
     });
 
@@ -1051,14 +1105,6 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       });
     });
 
-    // 标注排在节点正下方，y 是该条文字的顶边；同一节点的几条依次往下排
-    var visibleAnnotations = list(panel.annotations).filter(function (a) { return seen(a) && rects[a.node]; });
-    var stacked = Object.create(null);
-    var annotations = visibleAnnotations.map(function (a) {
-      var r = rects[a.node], k = stacked[a.node] || 0;
-      stacked[a.node] = k + 1;
-      return { node: a.node, text: a.text, x: r.x, y: r.y + r.h + ANNOT_GAP + k * ANNOT_LINE, isNew: fresh(a) };
-    });
 
     var size = canvasSize(panel);
     return {

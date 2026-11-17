@@ -157,3 +157,77 @@ test('同行或同列隔着别的节点时，连线绕开中间的节点', () =>
   assert.equal(am.points.length, 2, '相邻的两个节点仍走直线');
   for (const e of s.edges) for (const pt of e.points) assert.ok(pt.x >= 0 && pt.y >= 0 && pt.x <= s.width && pt.y <= s.height);
 });
+
+const segHitsBox = (o, q, r) => {
+  const x1 = Math.min(o.x, q.x), x2 = Math.max(o.x, q.x), y1 = Math.min(o.y, q.y), y2 = Math.max(o.y, q.y);
+  return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
+};
+// 标注文字的框：12px 字，汉字按 12px、其他字符按 7px 估宽，高一行（18px）
+const annotBox = (a) => {
+  const wide = a.text.replace(/[\u0000-ÿ]/g, '').length;
+  return { x: a.x, y: a.y, w: wide * 12 + (a.text.length - wide) * 7, h: 18 };
+};
+
+test('单行跳连：每一课的连线点和标签位置都在画布内，画布高度逐课不变', () => {
+  const p = {
+    kind: 'diagram', title: 't',
+    nodes: [
+      { id: 'a', label: 'A', col: 1, row: 1, since: 'l1' },
+      { id: 'b', label: 'B', col: 2, row: 1, since: 'l1' },
+      { id: 'c', label: 'C', col: 3, row: 1, since: 'l2' },
+    ],
+    edges: [
+      { from: 'a', to: 'b', since: 'l1' }, { from: 'b', to: 'c', since: 'l2' },
+      { from: 'a', to: 'c', label: '跳过', since: 'l3' },
+    ],
+  };
+  const heights = new Set();
+  for (const id of ['l1', 'l2', 'l3']) {
+    const s = at(id, p);
+    heights.add(s.height);
+    for (const e of s.edges) {
+      for (const pt of e.points) assert.ok(pt.x >= 0 && pt.y >= 0 && pt.x <= s.width && pt.y <= s.height, `${id} ${e.from}→${e.to} ${JSON.stringify(pt)} 超出 ${s.width}×${s.height}`);
+      // 页面把标签画在中间那段的中点：水平段往下绕时在线下 16px，否则在线上 6px
+      const k = Math.floor((e.points.length - 2) / 2), m = e.points[k], n = e.points[k + 1];
+      const ly = m.y === n.y ? (m.y > e.points[0].y ? m.y + 16 : m.y - 6) : (m.y + n.y) / 2 + 4;
+      assert.ok(ly >= 0 && ly <= s.height, `${id} ${e.from}→${e.to} 标签 y=${ly} 超出画布高 ${s.height}`);
+    }
+  }
+  assert.equal(heights.size, 1, `画布高度逐课变化：${[...heights]}`);
+  const ac = at('l3', p).edges.find((e) => e.to === 'c' && e.from === 'a');
+  assert.equal(segHitsBox(ac.points[0], ac.points[ac.points.length - 1], node(at('l3', p), 'b')) && ac.points.length === 2, false);
+});
+
+test('绕行线不穿过同一课可见的标注文字', () => {
+  const p = {
+    kind: 'diagram', title: 't',
+    nodes: [
+      { id: 'a', label: 'A', col: 1, row: 1, since: 'l1' },
+      { id: 'm', label: 'M', col: 2, row: 1, since: 'l1' },
+      { id: 'b', label: 'B', col: 3, row: 1, since: 'l1' },
+      { id: 'n', label: 'N', col: 2, row: 2, since: 'l1' },
+    ],
+    edges: [{ from: 'a', to: 'b', label: '绕行', since: 'l1' }],
+    annotations: [
+      { node: 'm', text: '第一条标注文字', since: 'l1' },
+      { node: 'm', text: '第二条标注文字', since: 'l1' },
+      { node: 'm', text: '第三条标注文字比较长', since: 'l1' },
+      { node: 'a', text: '起点自己的说明', since: 'l2' },
+    ],
+  };
+  for (const id of ['l1', 'l2']) {
+    const s = at(id, p);
+    assert.equal(s.annotations.filter((a) => a.node === 'm').length, 3);
+    const e = s.edges[0];
+    assert.ok(e.points.length > 2, `${id} 应绕行`);
+    const boxes = s.annotations.map(annotBox);
+    e.points.slice(1).forEach((q, i) => {
+      const o = e.points[i];
+      for (const r of boxes) assert.equal(segHitsBox(o, q, r), false, `${id} 段 ${JSON.stringify([o, q])} 穿过标注 ${JSON.stringify(r)}`);
+    });
+    for (const nd of s.nodes.filter((x) => x.id !== 'a' && x.id !== 'b')) {
+      e.points.slice(1).forEach((q, i) => assert.equal(segHitsBox(e.points[i], q, nd), false, `${id} 穿过节点 ${nd.id}`));
+    }
+    for (const pt of e.points) assert.ok(pt.y <= s.height && pt.y >= 0);
+  }
+});
