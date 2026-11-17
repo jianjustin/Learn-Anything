@@ -25,9 +25,14 @@ test('三类主题、串讲和示范案例都在', () => {
 
 test('用新的名字，没有旧名字的残留', () => {
   for (const w of ['`diagram`', '`problem`', '面试怎么讲', '面试题']) assert.ok(all.includes(w), w);
-  for (const re of [/INTERVIEW_COURSE/, /\.interview_points/, /demoCase/, /`architecture`/, /architecture 面板/, /`interview` 卡/, /type: "interview"/]) {
+  for (const re of [/INTERVIEW_COURSE/, /\.interview_points/, /demoCase/, /`architecture`/, /architecture 面板/, /`interview` 卡/, /type: "interview"/, /"type": "interview"/, /`service`/, /`store`/, /`external`/, /`placeholder`/]) {
     assert.doesNotMatch(all, re);
   }
+});
+
+test('模板的 lesson-guide 写明模拟面试结束后统一点评', () => {
+  assert.match(files[2], /模拟面试/);
+  assert.match(files[2], /统一点评/);
 });
 
 test('写明面试题同时算作本课的检验', () => {
