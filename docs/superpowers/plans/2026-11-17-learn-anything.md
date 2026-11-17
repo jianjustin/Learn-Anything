@@ -1680,6 +1680,21 @@ Expected: 全部通过
 Run: `bash install.sh --dry-run --courses-dir /Users/chenjianrui/projects`，把输出给用户看。同意后去掉 `--dry-run` 再运行。
 Expected: 两个配置目录里都装上了 plugin。在桌面应用和命令行里各开一个新会话，输入 `/learn-anything:learn` 能看到这个 skill。
 
+- [ ] **Step 2b: 实机冒烟（迁移真实数据之前）**
+
+整体审查要求先确认下面这些，再碰真实课程。每一项把结果记在这一步下面；有问题先修，修完用 `bash install.sh --reinstall` 刷新，再重测。
+
+1. 安装后的 plugin 是缓存里的拷贝还是就地加载：改一处仓库里的文字，开新会话看是否生效。
+2. `plugin install` 在有必填配置项时是否成功；`configure` 接受还不存在的课程目录、能否重复执行。
+3. 用 `/learn-anything:learn` 显式调用（退役之前和 interview-sprint 的触发词有重叠）：skill 能加载；正文里的课程目录和 skill 目录已替换成实际路径。
+4. 课程目录没配置时，skill 停下并提示配置，不在别处建课。
+5. `allowed-tools` 是否生效：运行校验和建课脚本时有没有权限弹窗。
+6. 课程目录在工作目录之外：读写 `course-data.js` 会不会每次都弹权限。会的话把课程目录加进 `additionalDirectories`，并写进 README。
+7. 两个子代理的调用名（预期 `learn-anything:course-researcher`、`learn-anything:answer-grader`）。
+8. 桌面应用里 hook 能否找到 `node`；新会话开始时提醒那一行是否显示。提醒状态按配置目录分开存，桌面和命令行各提醒一次属于正常。
+9. 发题时评分标准会不会通过文件编辑的 diff 或权限确认框显示在对话里（页面上已经隐藏）。看实际观感，由用户决定要不要改成别的落盘方式。
+10. `~/.claude-ccswitch` 用的是第三方网关和非 Anthropic 模型，令牌目前失效：plugin 装进这个配置目录后能否工作单独确认，评分子代理指定的 `sonnet` 在那边可能解析不了。
+
 - [ ] **Step 3: 迁移两门课（先确认）**
 
 ```bash

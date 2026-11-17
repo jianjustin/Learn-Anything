@@ -226,6 +226,7 @@ window.LEARN_COURSE = {
   - 页头：主题、目标、上法、断点说明、进度。
   - 提示条：`notice`；`researched` 为 `"no"` 时显示「大纲未经资料核对」。
   - 课程列表：每课的状态、「可选」标记，「已讲」和「已掌握」分开显示。
+  - `todo` 的课不显示卡片，即使数据里已经寄存了卡片；讲到这一课才显示。
   - 待回顾清单、资料清单。
   - 生长面板，以及「本课新增」。
   - 当前课的卡片和延伸阅读。
@@ -273,7 +274,7 @@ window.LEARN_COURSE = {
   3. 补全这一条的 `yours`、`ok`、`why`、`answer`。
   4. 按这一条的结果处理。没通过：往 `review` 里加一条，写明缺口，并把本课 `mastered` 设为 `false`。通过，且 `review` 里没有指向本课的条目：本课 `mastered` 设为 `true`。
 - 学习者说「跳过」时不做检验：`mastered` 保持 `false`，不加待回顾。题目已经发出的，把这一条记为 `skipped: true`。
-- 课末：对话里给 3–5 条小结；写入本课卡片，至少有 `points` 和 `quote`；本课设为 `done`，下一课设为 `current`，`resume` 指向下一课。
+- 课末：对话里给 3–5 条小结；写入本课卡片，至少有 `points` 和 `quote`；本课设为 `done`，下一课设为 `current`，`resume` 指向下一课。「下一课」指顺序上在本课之后的第一门 `todo` 的课；后面没有 `todo` 的课时，取整个列表里第一门 `todo` 的课；都没有就是课程讲完了。已经 `done` 或 `skipped` 的课不会被改回 `current`。
 - 讲完就推进，检验没通过也不卡住进度。
 
 ### 5.10 续学、回顾与调整大纲
@@ -341,6 +342,10 @@ window.LEARN_COURSE = {
 | `new-course.mjs` | `<courses_dir> <slug>` | 建目录，复制 `course.html`；`index.html` 不存在时复制；把课程登记进 `index-data.js`。目录已存在时拒绝并退出 1。不写 `course-data.js`。输出课程页的绝对路径 |
 | `migrate-interview.mjs` | `<旧课程目录> <courses_dir>` | 把旧格式课程转换后写入新位置，见 5.15 |
 | `review-reminder.mjs` | `<courses_dir>` | SessionStart 提醒，见 5.13 |
+| `list-courses.mjs` | `<courses_dir>` | 只读。每门课输出一行摘要：主题、模板、已讲与总课数、已掌握课数、待回顾条数、断点说明、更新时间；读不出来的课也列出并说明原因。入口用它列进度，不必读完每门课的数据文件 |
+| `refresh-pages.mjs` | `<courses_dir>` | 把两个页面模板重新复制到课程目录和每门已登记的课里。页面模板更新后运行 |
+
+写盘的脚本（`new-course.mjs`、`migrate-interview.mjs`、`refresh-pages.mjs`）只接受绝对路径的课程目录；空值、相对路径和没被替换的占位符一律拒绝。
 
 ### 5.15 课程迁移
 
@@ -351,11 +356,11 @@ window.LEARN_COURSE = {
   - `template` 设为 `"interview"`，原 `type` 移到 `templateData.type`。
   - `demoCase: true` 改为对应文字的 `notice`。
   - `mission` 三项为空字符串，`approach` 为空字符串，`researched` 为 `"skipped"`，`resources` 为空。
-  - `review` 的每条字符串改为 `{ "lesson": null, "text": 原文 }`。
+  - 旧的 `review` 是搁置的问题和备忘，不是掌握缺口，所以不迁成待回顾：新课程的 `review` 为空，旧条目合成一张标题为「迁移来的备忘」的 `note` 卡，放在 `resume.lesson` 那一课的最前面（没有 `resume` 时放在第一门不是 `done` 的课，都是 `done` 就放最后一课）。旧 `review` 为空时不加这张卡。
   - 面板 `architecture` 改为 `diagram`；节点类型 `service`、`store`、`external`、`placeholder` 分别改为 `box`、`pill`、`outline`、`ghost`。
   - `interview` 卡改为 `problem` 卡，原来没有标题的补上「面试题」。原来没有标题的 `quote` 卡补上「面试怎么讲」。
   - 每课加 `mastered: false` 和空的 `readings`。旧课程没有记录过掌握的证据。
-- 脚本不修改源目录。转换后运行校验，并核对课数、每课卡片数、各面板元素数与源文件一致。
+- 脚本不修改源目录。转换后运行校验，并核对课数、每课卡片数、各面板元素数与源文件一致（加了备忘卡的那一课多一张）。
 
 ### 5.16 触发、安装与退役
 
@@ -366,7 +371,7 @@ window.LEARN_COURSE = {
 
 安装：
 
-- 仓库根是一个本地 marketplace。通过本地路径添加后，plugin 直接从源目录加载，改动在下次会话生效。
+- 仓库根是一个本地 marketplace。安装后 Claude Code 用的可能是缓存里的一份拷贝，而不是源目录；改了仓库之后用 `bash install.sh --reinstall` 刷新。到底是拷贝还是就地加载，在第一次实机安装时确认。
 - `install.sh` 对两个配置目录分别添加 marketplace 并安装 plugin。
 - 安装后把 `courses_dir` 配置为 `/Users/chenjianrui/projects`。
 
