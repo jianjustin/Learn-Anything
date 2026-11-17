@@ -155,7 +155,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 }
 ```
 
-- `nodes`（必需）：`{ id, label, col, row, span?, style?, since, until? }`。`col`、`row` 是从 1 开始的整数，`span` 是占几列（整数，默认 1）。`style` 取 `box`（默认）、`pill`、`outline`、`ghost`。
+- `nodes`（必需）：`{ id, label, col, row, span?, style?, since, until? }`。`col`、`row` 从 1 开始，可以用 0.5 这样的小数微调（落在两格之间）；`span` 是占几列（正整数，默认 1）。`style` 取 `box`（默认）、`pill`、`outline`、`ghost`。
 - `edges`：`{ from, to, label?, style?, since, until? }`，`style` 取 `solid`（默认）或 `dashed`。
 - `groups`：`{ id, label, members[], since, until? }`，边框按当前可见的成员自动计算。
 - `annotations`：`{ node, text, since, until? }`，挂在节点上的小标签。
@@ -258,7 +258,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 **错误**（页面显示红框，校验命令退出码 1，必须修好）：
 
 - 外壳不对或外壳里不是严格 JSON。
-- 缺少必填字段，或字段类型不对（如 `mastered` 不是布尔、`readings` 不是数组、`col` 不是正整数）。
+- 缺少必填字段，或字段类型不对（如 `mastered` 不是布尔、`readings` 不是数组、`col` 小于 1 或不是数字、`span` 不是正整数）。
 - `status`、`researched`、资料 `kind`、面板 `kind`、节点 `style`、连线 `style`、`better` 的取值不在枚举内。
 - 课程 id、资料 id、节点 id、版本 id 重复；`current` 多于一个；`lessons` 为空。
 - 引用不存在：`resume.lesson`、`review[].lesson`、`since`、`until`、`routes[].lesson`、`readings[].resource`、`refs`、连线、分组、标注和路线引用的节点。
@@ -269,7 +269,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 
 - `slug` 不是 kebab-case，或与目录名不一致。
 - 未知的卡片类型。
-- 同时可见的两个节点占同一格；同一节点同时可见的标注超过 3 条。
+- 同时可见的两个节点的框相交（占同一格，或小数位置错开得不够）；同一节点同时可见的标注超过 3 条。
 
 ## 10. 完整示例
 

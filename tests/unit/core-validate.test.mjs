@@ -89,3 +89,25 @@ test('卡片类型和默认标题', () => {
   assert.equal(C.DEFAULT_CARD_TITLE.problem, '思考题');
   assert.equal(C.DEFAULT_CARD_TITLE.practice, '你的练习');
 });
+
+test('网格位置可以是不小于 1 的小数', () => {
+  const r = bad((d) => { d.growth = diagram([
+    { id: 'a', label: 'A', col: 1, row: 1, since: 'first' },
+    { id: 'b', label: 'B', col: 2.5, row: 1.5, since: 'first' },
+  ]); });
+  assert.deepEqual(r.errors, []);
+});
+
+for (const [name, patch] of [
+  ['col 小于 1', { col: 0.5 }],
+  ['row 为 0', { row: 0 }],
+  ['col 为负数', { col: -1 }],
+  ['row 不是有限数字', { row: Infinity }],
+  ['col 是字符串', { col: '2' }],
+  ['span 是小数', { span: 1.5 }],
+]) {
+  test(`报错：${name}`, () => {
+    const r = bad((d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 1, row: 1, since: 'first', ...patch }]); });
+    assert.ok(r.errors.length > 0);
+  });
+}

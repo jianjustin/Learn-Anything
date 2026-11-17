@@ -144,7 +144,7 @@ window.LEARN_COURSE = {
           "id": "recon",
           "label": "对账任务",
           "col": 7,
-          "row": 2,
+          "row": 2.5,
           "style": "box",
           "since": "consistency"
         }

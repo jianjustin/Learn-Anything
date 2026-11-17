@@ -529,6 +529,8 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   function isStr(v) { return typeof v === 'string'; }
   function isId(v) { return typeof v === 'string' && v.trim() !== ''; }
   function isPosInt(v) { return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= 1; }
+  // 网格位置从 1 开始，可以用 0.5 这样的小数微调
+  function isGridPos(v) { return typeof v === 'number' && isFinite(v) && v >= 1; }
   function show(v) { return typeof v === 'string' ? '"' + v + '"' : String(v); }
 
   // ---- 校验 ----
@@ -703,8 +705,8 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         else if (nodeIds[n.id]) ctx.errors.push(np + '.id 重复：' + n.id);
         else nodeIds[n.id] = true;
         requireStr(ctx, np, n, 'label');
-        if (!isPosInt(n.col)) ctx.errors.push(np + '.col 应为大于 0 的整数');
-        if (!isPosInt(n.row)) ctx.errors.push(np + '.row 应为大于 0 的整数');
+        if (!isGridPos(n.col)) ctx.errors.push(np + '.col 应为不小于 1 的数字（可以是小数）');
+        if (!isGridPos(n.row)) ctx.errors.push(np + '.row 应为不小于 1 的数字（可以是小数）');
         if (n.span !== undefined && !isPosInt(n.span)) ctx.errors.push(np + '.span 应为大于 0 的整数');
         if (n.style !== undefined) checkEnum(ctx, np + '.style', n.style, NODE_STYLE);
         checkSpan(ctx, np, n);
@@ -911,15 +913,18 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   }
   function chipStack(k) { return k ? CHIP_LIFT + k * CHIP_H + (k - 1) * CHIP_GAP : 0; }
 
-  // 第一行节点上方要放得下它的标注：整张图往下挪，挪多少按整个面板（不按当前课）算，节点位置逐课不变。
-  // 挪了时再多留 8px，包住标注的分组外框不会贴着画布顶边
+  // 靠近顶边的节点上方要放得下它的标注：整张图往下挪，挪多少按整个面板（不按当前课）算，节点位置逐课不变。
+  // 挪了时再多留 8px，包住标注的分组外框不会贴着画布顶边。
+  // 第 1 行的节点上方没有别的空间，标注全靠挪；row 是小数的节点自带 (row - 1) 行的空间，只挪不够的部分；
+  // 第 2 行起自带的空间（一行 130px）比 3 条标注（64px + 8px）大，不用挪
   function topOffset(panel) {
-    var count = Object.create(null), stack = 0;
+    var count = Object.create(null), extra = 0, g = core.GRID;
     list(panel.annotations).forEach(function (a) { count[a.node] = (count[a.node] || 0) + 1; });
     list(panel.nodes).forEach(function (n) {
-      if (n.row === 1) stack = Math.max(stack, chipStack(Math.min(count[n.id] || 0, MAX_ANNOTATIONS)));
+      var stack = chipStack(Math.min(count[n.id] || 0, MAX_ANNOTATIONS));
+      if (stack) extra = Math.max(extra, stack + 8 - (n.row - 1) * g.rowH);
     });
-    return MARGIN + (stack ? stack + 8 : 0);
+    return MARGIN + Math.max(0, extra);
   }
 
   function nodeRect(n, top) {
@@ -980,9 +985,13 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   var LABEL_BELOW = 20;   // 往下绕的线在最深一条线下方再留出一个连线标签的高度
   var SIDE_GAP = 24;      // 列间空隙的一半
 
+  // 「同一行」：两个节点的上下范围有重叠（整数位置下就是 row 相等）；小数位置下，差半行的节点也算同一行，
+  // 它们之间不再有可走的行间空隙，只能从两者的上方或下方绕。「同一列」同理，按左右范围有无重叠判断
+  function sameRow(a, b) { return a.y < b.y + b.h && b.y < a.y + a.h; }
+
   // 同一行、中间至少隔着一列的两个节点之间的连线可能要绕行
   function mayDetour(a, b) {
-    return a.y === b.y && Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w) > core.GRID.colW - core.GRID.nodeW;
+    return sameRow(a, b) && Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w) > core.GRID.colW - core.GRID.nodeW;
   }
 
   // 直线穿过别的节点时的候选折线，全部是横竖线段，落在画布内：
@@ -992,19 +1001,20 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   function detourCandidates(a, b) {
     var g = core.GRID, out = [];
     var acx = a.x + a.w / 2, bcx = b.x + b.w / 2, ay = a.y + a.h / 2, by = b.y + b.h / 2;
-    var vOverlap = a.y < b.y + b.h && b.y < a.y + a.h;
+    var vOverlap = sameRow(a, b);
     var hOverlap = a.x < b.x + b.w && b.x < a.x + a.w;
     var dir = a.x < b.x ? 1 : -1;
     var aSide = dir > 0 ? a.x + a.w : a.x, bSide = dir > 0 ? b.x : b.x + b.w;
     if (vOverlap) {
+      var top = Math.min(a.y, b.y);
       LANES_ABOVE.forEach(function (d) {
-        var y = a.y - d;
+        var y = top - d;
         if (y >= MARGIN) out.push([{ x: acx, y: a.y }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: b.y }]);
       });
-      var bottom = a.y + a.h;
+      var abottom = a.y + a.h, bbottom = b.y + b.h, bottom = Math.max(abottom, bbottom);
       LANES_BELOW.forEach(function (d) {
         var y = bottom + d;
-        out.push([{ x: acx, y: bottom }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: bottom }]);
+        out.push([{ x: acx, y: abottom }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: bbottom }]);
       });
       LANES_BELOW.forEach(function (d) {
         var y = bottom + d, x1 = aSide + dir * SIDE_GAP, x2 = bSide - dir * SIDE_GAP;
@@ -1088,27 +1098,42 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     var deepest = Math.max.apply(null, LANES_BELOW);
     list(panel.edges).forEach(function (e) {
       var a = rects[e.from], b = rects[e.to];
-      if (a && b && mayDetour(a, b)) height = Math.max(height, a.y + a.h + deepest + LABEL_BELOW);
+      if (a && b && mayDetour(a, b)) height = Math.max(height, Math.max(a.y, b.y) + a.h + deepest + LABEL_BELOW);
     });
     return { width: right + MARGIN, height: height };
   }
 
+  // 两个节点的矩形相交（只贴边不算）就是重叠。整数位置下，矩形相交等于占了同一格。
+  // 每处重叠报一条：取相交区域的中心点，把盖着这个点的所有节点列在一起；左上角的位置按网格单位报
+  var OVERLAP_EPS = 1e-6;
   function diagramWarnings(panel, nodes, annotations) {
-    var warnings = [], cells = Object.create(null), reported = Object.create(null);
+    var warnings = [], reported = Object.create(null);
     var prefix = '图「' + panel.title + '」：';
-    nodes.forEach(function (n) {
-      for (var c = 0; c < (n.span || 1); c++) {
-        var key = (n.col + c) + ',' + n.row;
-        (cells[key] = cells[key] || []).push(n.id);
-      }
-    });
-    Object.keys(cells).forEach(function (key) {
-      var ids = cells[key];
-      var names = ids.join('、');
-      if (ids.length < 2 || reported[names]) return;
-      reported[names] = true;
-      var cr = key.split(',');
-      warnings.push(prefix + '节点 ' + names + ' 占同一格（第 ' + cr[0] + ' 列、第 ' + cr[1] + ' 行）');
+    var rects = nodes.map(function (n) { return nodeRect(n, 0); });
+    function meet(r, q) {
+      return Math.min(r.x + r.w, q.x + q.w) - Math.max(r.x, q.x) > OVERLAP_EPS &&
+        Math.min(r.y + r.h, q.y + q.h) - Math.max(r.y, q.y) > OVERLAP_EPS;
+    }
+    function covers(r, x, y) { return r.x + OVERLAP_EPS < x && x < r.x + r.w - OVERLAP_EPS && r.y + OVERLAP_EPS < y && y < r.y + r.h - OVERLAP_EPS; }
+    nodes.forEach(function (n, i) {
+      var spots = [];
+      rects.forEach(function (q, j) {
+        if (j === i || !meet(rects[i], q)) return;
+        spots.push({
+          x: (Math.max(rects[i].x, q.x) + Math.min(rects[i].x + rects[i].w, q.x + q.w)) / 2,
+          y: (Math.max(rects[i].y, q.y) + Math.min(rects[i].y + rects[i].h, q.y + q.h)) / 2
+        });
+      });
+      spots.sort(function (p, q) { return p.x - q.x; });  // 整数位置下就是从左到右一格一格报
+      spots.forEach(function (pt) {
+        var group = nodes.filter(function (m, k) { return covers(rects[k], pt.x, pt.y); });
+        var names = group.map(function (m) { return m.id; }).join('、');
+        if (group.length < 2 || reported[names]) return;
+        reported[names] = true;
+        var col = Math.max.apply(null, group.map(function (m) { return m.col; }));
+        var row = Math.max.apply(null, group.map(function (m) { return m.row; }));
+        warnings.push(prefix + '节点 ' + names + ' 占同一格（第 ' + round(col) + ' 列、第 ' + round(row) + ' 行）');
+      });
     });
     var count = Object.create(null);
     annotations.forEach(function (a) { count[a.node] = (count[a.node] || 0) + 1; });

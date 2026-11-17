@@ -187,7 +187,7 @@ window.LEARN_COURSE = {
 
 元素字段：
 
-- `nodes`：`{ id, label, col, row, span?, style?, since, until? }`。按网格定位，位置确定后不再改。`style` 取 `box`（默认）、`pill`、`outline`、`ghost`。
+- `nodes`：`{ id, label, col, row, span?, style?, since, until? }`。按网格定位，位置确定后不再改。`col`、`row` 从 1 开始，可以用小数微调。`style` 取 `box`（默认）、`pill`、`outline`、`ghost`。
 - `edges`：`{ from, to, label?, style?, since, until? }`。`style` 取 `solid`（默认）或 `dashed`。
 - `groups`：`{ id, label, members[], since, until? }`。
 - `annotations`：`{ node, text, since, until? }`。

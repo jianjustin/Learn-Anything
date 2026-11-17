@@ -345,3 +345,91 @@ test('密集图：全部内容在画布内，画布大小逐课不变', () => {
   }
   assert.equal(sizes.size, 1, `画布大小逐课变化：${[...sizes]}`);
 });
+
+test('小数位置落在两格之间', () => {
+  const lessons = [{ id: 'l1' }];
+  const p = { kind: 'diagram', title: 't', edges: [], groups: [], annotations: [], routes: [], nodes: [
+    { id: 'a', label: 'A', col: 1, row: 2, since: 'l1' },
+    { id: 'b', label: 'B', col: 1, row: 3, since: 'l1' },
+    { id: 'm', label: 'M', col: 2.5, row: 2.5, since: 'l1' },
+  ] };
+  const s = plain(C.diagramAt(p, lessons, 'l1'));
+  const n = (id) => s.nodes.find((x) => x.id === id);
+  assert.equal(n('m').y - n('a').y, 0.5 * C.GRID.rowH);
+  assert.equal(n('b').y - n('m').y, 0.5 * C.GRID.rowH);
+  assert.equal(n('m').x - n('a').x, 1.5 * C.GRID.colW);
+  assert.deepEqual(s.warnings, []);
+  // 全部节点都在画布内
+  for (const x of s.nodes) assert.ok(x.x >= 0 && x.y >= 0 && x.x + x.w <= s.width && x.y + x.h <= s.height);
+});
+
+test('矩形相交才算重叠：错开半格的两个节点会重叠，错开一格不会', () => {
+  const lessons = [{ id: 'l1' }];
+  const mk = (col) => ({ kind: 'diagram', title: 't', edges: [], groups: [], annotations: [], routes: [], nodes: [
+    { id: 'a', label: 'A', col: 1, row: 1, since: 'l1' },
+    { id: 'b', label: 'B', col, row: 1, since: 'l1' },
+  ] });
+  assert.equal(plain(C.diagramAt(mk(1.5), lessons, 'l1')).warnings.length, 1); // 半格 80px < 节点宽 112px
+  assert.deepEqual(plain(C.diagramAt(mk(2), lessons, 'l1')).warnings, []);
+});
+
+// ---- 小数位置下的整体行为 ----
+const frac = (nodes, edges = [], annotations = []) => ({ kind: 'diagram', title: 't', groups: [], routes: [], nodes, edges, annotations });
+const fracAt = (p) => plain(C.diagramAt(p, [{ id: 'l1' }], 'l1'));
+const fn = (id, col, row, extra = {}) => ({ id, label: id.toUpperCase(), col, row, since: 'l1', ...extra });
+const crossesAny = (pts, s, skip) => s.nodes.filter((n) => !skip.includes(n.id)).some((n) => pathCrosses(pts, n, 0));
+
+test('同格警告的措辞：整数位置报「第 c 列、第 r 行」，小数位置报重叠区域左上角的位置', () => {
+  const w1 = fracAt(frac([fn('a', 1, 1), fn('d', 1, 1)])).warnings;
+  assert.deepEqual(w1, ['图「t」：节点 a、d 占同一格（第 1 列、第 1 行）']);
+  const w2 = fracAt(frac([fn('a', 1, 1), fn('b', 1.5, 1.25)])).warnings;
+  assert.deepEqual(w2, ['图「t」：节点 a、b 占同一格（第 1.5 列、第 1.25 行）']);
+});
+
+test('只贴边不算重叠', () => {
+  // 上下错开的距离正好等于节点高 40px：rowH 130，错开 40/130 行
+  const dy = 1 + C.GRID.nodeH / C.GRID.rowH;
+  assert.deepEqual(fracAt(frac([fn('a', 1, 1), fn('b', 1, dy)])).warnings, []);
+});
+
+test('第一行附近的小数位置：标注仍在画布内，不被顶部截掉', () => {
+  const notes = ['一', '二', '三'].map((t) => ({ node: 'a', text: t, since: 'l1' }));
+  for (const row of [1, 1.2, 1.5, 1.9, 2]) {
+    const s = fracAt(frac([fn('a', 1, row), fn('b', 2, 3)], [], notes));
+    for (const c of s.annotations) assert.ok(c.y >= 0, `row ${row}`);
+    for (const x of s.nodes) assert.ok(x.y >= 0 && x.y + x.h <= s.height, `row ${row}`);
+  }
+  // 整数的第 1 行与第 2 行之后的结果不变：第 2 行放得下标注，不再下移
+  const top = (row) => fracAt(frac([fn('a', 1, row)], [], notes)).nodes[0].y - (row - 1) * C.GRID.rowH;
+  assert.equal(top(1), 32 + 64 + 8);
+  assert.equal(top(2), 32);
+  // 小数行：放得下就不多移，放不下才移到刚好放得下
+  assert.ok(top(1.5) > top(2) && top(1.5) < top(1));
+  const s15 = fracAt(frac([fn('a', 1, 1.5)], [], notes));
+  assert.equal(Math.min(...s15.annotations.map((c) => c.y)), 32 + 8);
+});
+
+test('同一行带一点小数偏移的两个节点之间的绕行：不穿过任何节点，端点在两个节点的边上，画布放得下', () => {
+  // a 在 b 的左边隔两列，中间 m 挡着；b 比 a 低 0.3 行（矩形上下仍有重叠）
+  // 第 1 行上方没有空隙，只能往下绕；第 2 行先试上方
+  for (const [dy, r] of [[0, 1], [0.1, 1], [0.3, 1], [0.3, 2], [-0.3, 1], [-0.3, 2]]) {
+    const p = frac([fn('a', 1, r), fn('m', 2, r + dy / 2), fn('b', 3, r + dy)], [{ from: 'a', to: 'b', since: 'l1' }]);
+    const s = fracAt(p);
+    const pts = s.edges[0].points;
+    assert.ok(pts.length > 2, `dy ${dy} 应该绕行`);
+    assert.ok(!crossesAny(pts, s, ['a', 'b']), `dy ${dy}`);
+    // 线只在出发和到达的那一段碰自己的两端节点，中间不再穿回去
+    pts.slice(1).forEach((q, i) => {
+      if (i > 0) assert.ok(!segCrossesRect(pts[i], q, node(s, 'a'), 0), `dy ${dy} 第 ${i} 段穿过起点节点`);
+      if (i < pts.length - 2) assert.ok(!segCrossesRect(pts[i], q, node(s, 'b'), 0), `dy ${dy} 第 ${i} 段穿过终点节点`);
+    });
+    assert.ok(onBorder(pts[0], node(s, 'a')) && onBorder(pts.at(-1), node(s, 'b')), `dy ${dy}`);
+    for (const q of pts) assert.ok(q.x >= 0 && q.y >= 0 && q.x <= s.width && q.y <= s.height, `dy ${dy}`);
+  }
+});
+
+test('半行错开的上下两个节点之间的连线是斜线或折线，不穿过中间的节点', () => {
+  const p = frac([fn('a', 1, 1), fn('m', 1.5, 2), fn('b', 2, 3)], [{ from: 'a', to: 'b', since: 'l1' }]);
+  const s = fracAt(p);
+  assert.ok(!crossesAny(s.edges[0].points, s, ['a', 'b']));
+});

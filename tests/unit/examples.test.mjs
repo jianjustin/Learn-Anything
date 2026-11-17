@@ -64,3 +64,8 @@ test('示例里的页面与模板逐字节一致，登记齐全', () => {
 test('README 中英文都在，写了安装命令', () => {
   for (const f of ['README.md', 'README.zh-CN.md']) assert.match(readFileSync(path.join(ROOT, f), 'utf8'), /bash install\.sh/);
 });
+
+test('面试示例是源示例的原样迁移：保留了小数位置', () => {
+  const nodes = data['realtime-billing'].growth.find((p) => p.kind === 'diagram').nodes;
+  assert.ok(nodes.some((n) => !Number.isInteger(n.row) || !Number.isInteger(n.col)));
+});

@@ -398,3 +398,13 @@ test('通过符号链接指到源目录的 courses_dir 也被拒绝', () => {
   assert.equal(run(src, link).status, 1);
   assert.deepEqual(snapshotDir(src), before);
 });
+
+test('命令行：旧课程里有小数位置（旧格式允许）时能迁移，位置原样保留', () => {
+  const src = oldCopy((o) => { o.growth[0].nodes[3].row = 2.5; });
+  const home = tmp();
+  const r = run(src, home);
+  assert.equal(r.status, 0, r.stderr);
+  const nodes = readDataFile(path.join(home, 'old-interview/course-data.js'), 'LEARN_COURSE').growth[0].nodes;
+  assert.equal(nodes[3].row, 2.5);
+  assert.equal(nodes[3].col, 2);
+});
