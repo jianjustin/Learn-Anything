@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
 # 汇总所有测试。每一步都会运行，任何一步失败，最终退出码为 1，这样一次运行能看到所有问题。
+# 用法：bash tests/run-all.sh [--sync]
+#   --sync  先以模板为准重新复制 examples/ 里的 course.html、index.html，再跑测试。
+#           默认不复制，不改工作树：副本与模板不一致时，单元测试里「逐字节一致」那一条会失败并提示加 --sync。
 set -u
 cd "$(dirname "$0")/.." || exit 1
+
+sync=0
+for arg in "$@"; do
+  case $arg in
+    --sync) sync=1 ;;
+    *) echo "用法：bash tests/run-all.sh [--sync]" >&2; exit 2 ;;
+  esac
+done
 
 status=0
 ASSETS=plugins/learn-anything/skills/learn/assets
 
-echo "== 同步 examples/ 里的页面模板 =="
-# 示例里的 course.html、index.html 必须与模板逐字节一致，这里以模板为准重新复制
-for dir in examples/*/; do
-  [ -f "${dir}course-data.js" ] || continue
-  cp "$ASSETS/course.html" "${dir}course.html" || status=1
-done
-cp "$ASSETS/index.html" examples/index.html || status=1
+if [ "$sync" -eq 1 ]; then
+  echo "== 同步 examples/ 里的页面模板 =="
+  for dir in examples/*/; do
+    [ -f "${dir}course-data.js" ] || continue
+    cp "$ASSETS/course.html" "${dir}course.html" || status=1
+  done
+  cp "$ASSETS/index.html" examples/index.html || status=1
+fi
 
 echo "== node --test tests/unit =="
 node --test tests/unit || status=1

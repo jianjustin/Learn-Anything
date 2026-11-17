@@ -142,3 +142,46 @@ for (const [name, item] of [
 test('practice 条目 skipped: false 时可以有 yours 和 ok', () => {
   assert.deepEqual(bad((d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ q: 'x', skipped: false, yours: 'y', ok: true }] }]; }).errors, []);
 });
+
+// ---- 面板规则的反例：每条只产生一个错误，错误点名出错的位置 ----
+const twoNodes = (extra) => [{
+  kind: 'diagram', title: 't',
+  nodes: [{ id: 'a', label: 'A', col: 1, row: 1, since: 'first' }, { id: 'b', label: 'B', col: 2, row: 1, since: 'first' }],
+  edges: [], groups: [], annotations: [], routes: [], ...extra,
+}];
+const timeline = (metric) => [{ kind: 'timeline', title: 't', events: [{ since: 'first', title: 'e', metric }] }];
+
+for (const [name, growth, re] of [
+  ['分组成员引用不存在的节点', twoNodes({ groups: [{ id: 'g', label: 'G', members: ['a', 'zz'], since: 'first' }] }), /^growth\[0\]\.groups\[0\]\.members\[1\] .*"zz"/],
+  ['标注引用不存在的节点', twoNodes({ annotations: [{ node: 'zz', text: 'x', since: 'first' }] }), /^growth\[0\]\.annotations\[0\]\.node .*"zz"/],
+  ['路线的 steps 引用不存在的节点', twoNodes({ routes: [{ lesson: 'first', steps: ['a', 'zz'] }] }), /^growth\[0\]\.routes\[0\]\.steps\[1\] .*"zz"/],
+  ['路线的 lesson 引用不存在的课', twoNodes({ routes: [{ lesson: 'nope', steps: ['a'] }] }), /^growth\[0\]\.routes\[0\]\.lesson .*"nope"/],
+  ['版本 id 重复', [{ kind: 'code', title: 'c', versions: [
+    { id: 'v1', since: 'first', label: 'a', code: 'x' }, { id: 'v1', since: 'second', label: 'b', code: 'y' },
+  ] }], /^growth\[0\]\.versions\[1\]\.id 重复：v1$/],
+  ['metric 的 value 是字符串', timeline({ value: '6', unit: '%' }), /^growth\[0\]\.events\[0\]\.metric /],
+  ['metric 缺 unit', timeline({ value: 6 }), /^growth\[0\]\.events\[0\]\.metric /],
+  ['metric 缺 value', timeline({ unit: '%' }), /^growth\[0\]\.events\[0\]\.metric /],
+  ['metric 不是对象', timeline(5), /^growth\[0\]\.events\[0\]\.metric /],
+]) {
+  test(`报错：${name}`, () => {
+    const r = bad((d) => { d.growth = growth; });
+    assert.equal(r.errors.length, 1, r.errors.join('\n'));
+    assert.match(r.errors[0], re);
+  });
+}
+
+test('面板反例的对照：同样的面板引用都存在时没有错误', () => {
+  const r = bad((d) => { d.growth = twoNodes({
+    groups: [{ id: 'g', label: 'G', members: ['a', 'b'], since: 'first' }],
+    annotations: [{ node: 'a', text: 'x', since: 'first' }],
+    routes: [{ lesson: 'second', steps: ['a', 'b'] }],
+  }).concat(timeline({ value: 6, unit: '%' })); });
+  assert.deepEqual(r, { errors: [], warnings: [] });
+});
+
+test('警告：slug 不是 kebab-case（与目录名一致时也警告）', () => {
+  const r = bad((d) => { d.slug = 'Bad_Slug'; }, 'Bad_Slug');
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.warnings, ['slug 不是 kebab-case：Bad_Slug']);
+});

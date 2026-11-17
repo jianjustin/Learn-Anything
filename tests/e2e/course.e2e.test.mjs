@@ -5,6 +5,9 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { eventually, fileUrl, launchBrowser, makeCourseDir, openPage, rewriteData } from '../helpers/browser.mjs';
 import { loadCore, loadFixture } from '../helpers/load-core.mjs';
+import { SCRIPTS_DIR } from '../helpers/paths.mjs';
+
+const { readDataFile, serializeDataFile } = await import(path.join(SCRIPTS_DIR, 'lib/data-file.mjs'));
 
 const C = loadCore();
 const allCards = loadFixture('all-cards');
@@ -160,8 +163,18 @@ test('B7b 文件不存在、没有赋值、校验出错：分别提示，保留�
   writeFileSync(file, good);
   await eventually(() => page.locator('#errors-box').isHidden());
 
-  writeFileSync(file, good.replace('"version": 1', '"version": 2'));
+  // 校验出错的数据里，主题和卡片也改了：页面必须仍显示上次的主题和卡片，不能渲染出错的那份
+  const firstCardBefore = await page.locator('#cards .card').first().innerText();
+  const broken = readDataFile(file, 'LEARN_COURSE');
+  broken.version = 2;
+  broken.topic = '校验出错时不该出现的主题';
+  broken.lessons.find((l) => l.id === 'wrap').cards.unshift({ type: 'note', text: '校验出错时不该出现的卡片' });
+  writeFileSync(file, serializeDataFile('LEARN_COURSE', broken));
   await expectError(/version 应为 1/);
+  await page.waitForTimeout(3000); // 再经过一次自动刷新
+  assert.equal(await page.locator('#topic').innerText(), allCards.topic);
+  assert.equal(await page.locator('#cards .card').first().innerText(), firstCardBefore);
+  assert.doesNotMatch(await page.locator('body').innerText(), /不该出现/);
 
   writeFileSync(file, good);
   await eventually(() => page.locator('#errors-box').isHidden());

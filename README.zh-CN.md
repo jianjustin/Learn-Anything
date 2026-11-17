@@ -155,7 +155,7 @@ install.sh                # 安装脚本
 bash tests/run-all.sh
 ```
 
-它依次做：把两份页面模板同步到 `examples/`；单元测试（`node --test tests/unit`）；页面测试（`node --test tests/e2e`）；`bash tests/install.test.sh`；`claude plugin validate plugins/learn-anything --strict`。每一步都会跑，任何一步失败，最后退出码为 1。
+它依次做：单元测试（`node --test tests/unit`）；页面测试（`node --test tests/e2e`）；`bash tests/install.test.sh`；`claude plugin validate plugins/learn-anything --strict`。每一步都会跑，任何一步失败，最后退出码为 1。它不改工作树：`examples/` 里的两份页面副本必须与模板逐字节一致，改了页面模板之后运行 `bash tests/run-all.sh --sync`，先把模板复制到 `examples/` 再跑测试。
 
 页面测试需要 `playwright-core` 和本机的 Chrome（或 Chromium）。`playwright-core` 在本地、`PLAYWRIGHT_CORE_PATH` 指向的位置或 npm 全局目录里找得到即可。页面测试被跳过（比如浏览器启动不了）算失败。`install.sh` 的测试一部分用 `--dry-run`，一部分真正执行；真正执行时 `HOME` 是临时目录，`PATH` 最前面的 `claude` 是一个只记录调用的桩，不会改动任何真实的 Claude Code 配置。
 

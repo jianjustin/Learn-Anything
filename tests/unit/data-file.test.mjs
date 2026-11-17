@@ -18,7 +18,8 @@ test('序列化的形态', () => {
 });
 
 test('容忍 BOM 和首尾空白', () => {
-  assert.deepEqual(parseDataFile('﻿\n  window.LEARN_COURSE = {"version":1};\n\n', 'LEARN_COURSE'), { version: 1 });
+  assert.deepEqual(parseDataFile('\uFEFF\n  window.LEARN_COURSE = {"version":1};\n\n', 'LEARN_COURSE'), { version: 1 });
+  assert.deepEqual(parseDataFile('\uFEFFwindow.LEARN_COURSE = {"version":1};', 'LEARN_COURSE'), { version: 1 });
 });
 
 for (const [name, text, code] of [

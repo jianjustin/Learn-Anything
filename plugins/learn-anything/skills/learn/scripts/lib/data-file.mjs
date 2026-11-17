@@ -12,7 +12,8 @@ export class DataFileError extends Error {
 }
 
 export function parseDataFile(text, globalName) {
-  const src = String(text).replace(/^﻿/, '').trim();
+  // trim() 去掉的空白包括开头的 BOM（U+FEFF），带 BOM 的文件不用另外处理
+  const src = String(text).trim();
   const prefix = `window.${globalName} = `;
   if (!src.startsWith(prefix)) {
     throw new DataFileError('wrapper', `数据文件应以 "${prefix}" 开头`);

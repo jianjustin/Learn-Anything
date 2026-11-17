@@ -126,10 +126,10 @@ test('日期记录里的 lastReminded 不是字符串：按没提醒过处理', 
   assert.ok(runReminder({ ...h, today: '2026-11-17' }));
 });
 
-test('状态目录写不进去：不抛错', () => {
+test('状态目录写不进去：不提醒（返回 null），否则每个新会话都会重复提醒', () => {
   const h = makeHome([{ slug: 'a', review: 1 }]);
   writeFileSync(h.stateDir, 'i am a file');
-  assert.doesNotThrow(() => runReminder({ ...h, today: '2026-11-17' }));
+  assert.equal(runReminder({ ...h, today: '2026-11-17' }), null);
 });
 
 test('命令行：用 CLAUDE_PLUGIN_DATA 记日期，当天第二次不再输出，退出 0', () => {

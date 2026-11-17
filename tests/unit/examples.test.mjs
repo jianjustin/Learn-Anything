@@ -56,8 +56,13 @@ test('面试示例：套用面试模板，有 diagram 面板', () => {
 });
 
 test('示例里的页面与模板逐字节一致，登记齐全', () => {
-  for (const s of slugs) assert.deepEqual(readFileSync(path.join(ROOT, 'examples', s, 'course.html')), readFileSync(path.join(ASSETS_DIR, 'course.html')));
-  assert.deepEqual(readFileSync(path.join(ROOT, 'examples/index.html')), readFileSync(path.join(ASSETS_DIR, 'index.html')));
+  // 用 equal 比较 Buffer 的 equals 结果：不一致时只打印提示，不把整页 HTML 当 diff 打出来
+  const hint = (rel) => `examples/${rel} 与页面模板不一致：运行 bash tests/run-all.sh --sync 同步示例里的页面副本`;
+  for (const s of slugs) {
+    const same = readFileSync(path.join(ROOT, 'examples', s, 'course.html')).equals(readFileSync(path.join(ASSETS_DIR, 'course.html')));
+    assert.ok(same, hint(`${s}/course.html`));
+  }
+  assert.ok(readFileSync(path.join(ROOT, 'examples/index.html')).equals(readFileSync(path.join(ASSETS_DIR, 'index.html'))), hint('index.html'));
   assert.deepEqual(readDataFile(path.join(ROOT, 'examples/index-data.js'), 'LEARN_INDEX').courses.map((c) => c.slug).sort(), slugs);
 });
 
@@ -71,6 +76,7 @@ test('README 中英文：改了仓库后用 --reinstall，页面模板用 refres
   for (const t of [zh, en]) {
     assert.match(t, /bash install\.sh --reinstall/);
     assert.match(t, /scripts\/refresh-pages\.mjs <[^>]+>/);
+    assert.match(t, /bash tests\/run-all\.sh --sync/);
   }
   assert.doesNotMatch(zh, /下次会话生效/);
   assert.doesNotMatch(zh, /全部使用 `--dry-run`/);

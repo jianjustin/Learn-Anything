@@ -155,7 +155,7 @@ Run all the tests:
 bash tests/run-all.sh
 ```
 
-It runs, in order: sync the two page templates into `examples/`; the unit tests (`node --test tests/unit`); the page tests (`node --test tests/e2e`); `bash tests/install.test.sh`; `claude plugin validate plugins/learn-anything --strict`. Every step runs, and if any step fails the final exit code is 1.
+It runs, in order: the unit tests (`node --test tests/unit`); the page tests (`node --test tests/e2e`); `bash tests/install.test.sh`; `claude plugin validate plugins/learn-anything --strict`. Every step runs, and if any step fails the final exit code is 1. It does not change the working tree: the two page copies in `examples/` must be byte-identical to the templates, so after changing a page template run `bash tests/run-all.sh --sync`, which copies the templates into `examples/` before running the tests.
 
 The page tests need `playwright-core` and a local Chrome (or Chromium). `playwright-core` is found if it is installed locally, at the path in `PLAYWRIGHT_CORE_PATH`, or in the global npm directory. A skipped page test (for example, when the browser cannot start) counts as a failure. Some `install.sh` tests use `--dry-run` and some really run the script; when they do, `HOME` is a temporary directory and the first `claude` on `PATH` is a stub that only records its calls, so no real Claude Code configuration is touched.
 

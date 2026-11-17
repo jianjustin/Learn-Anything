@@ -298,13 +298,16 @@ test('G13 密集图：节点标签、标注、连线标签的字都在自己的�
   const b = await launchOnce();
   if (b.skip) return t.skip(b.skip);
   const { page } = await openDense(t, b.browser);
+  const checked = { 节点: 0, 标注: 0, 连线标签: 0 };
   for (const l of dense.lessons) {
     await showLesson(page, l.id);
-    const bad = await page.locator('[data-panel="diagram"] svg').evaluate((svg) => {
+    const { bad, counts } = await page.locator('[data-panel="diagram"] svg').evaluate((svg) => {
       const out = [];
+      const counts = { 节点: 0, 标注: 0, 连线标签: 0 };
       // 字的外框（按字体的上下沿算）：左右要离框边至少 inset（节点 4px、小标签 2px，比页面用的内边距略小）；
       // 上下允许字体行高带来的 1px 出入
       const check = (kind, id, frame, el, inset) => {
+        counts[kind] += 1;
         const f = frame.getBBox(), t = el.getBBox();
         if (t.x < f.x + inset - 0.5 || t.x + t.width > f.x + f.width - inset + 0.5 || t.y < f.y - 1 || t.y + t.height > f.y + f.height + 1) {
           out.push(`${kind} ${id} 「${el.textContent}」 字 ${[t.x, t.y, t.width, t.height].map(Math.round)} 框 ${[f.x, f.y, f.width, f.height].map(Math.round)}`);
@@ -313,10 +316,13 @@ test('G13 密集图：节点标签、标注、连线标签的字都在自己的�
       svg.querySelectorAll('.node').forEach((g) => g.querySelectorAll('text tspan').forEach((ts) => check('节点', g.dataset.nodeId, g.querySelector('rect.shape'), ts, 4)));
       svg.querySelectorAll('.d-annot').forEach((g) => check('标注', g.dataset.annot, g.querySelector('rect'), g.querySelector('text'), 2));
       svg.querySelectorAll('.edge-label').forEach((g) => check('连线标签', g.dataset.edgeLabel, g.querySelector('rect'), g.querySelector('text'), 2));
-      return out;
+      return { bad: out, counts };
     });
+    for (const kind of Object.keys(checked)) checked[kind] += counts[kind];
     assert.deepEqual(bad, [], l.id);
   }
+  // 三类元素都真的检查过：选择器失效时这条测试不能空跑通过
+  for (const [kind, n] of Object.entries(checked)) assert.ok(n > 0, `没有检查到任何${kind}`);
 });
 
 test('G14 密集图：没有换行符的长标签折成两行，仍放不下才截断，悬停看全文', async (t) => {
@@ -341,4 +347,112 @@ test('G14 密集图：没有换行符的长标签折成两行，仍放不下才�
   assert.match(cut[1], /…$/, `第二行应以省略号结尾：${JSON.stringify(cut)}`);
   assert.ok(huge.startsWith(cut[0]), JSON.stringify(cut));
   assert.equal(await n2.locator('title').textContent(), huge);
+});
+
+// ---- 恶意数据：面板里的文字字段一律按文字显示，导出的 SVG 也一样 ----
+const PAYLOADS = [
+  '<img src=x onerror="window.__pwned=1">',
+  '</svg><script>window.__pwned=2</script>',
+  '"><svg onload="window.__pwned=3"><a href="javascript:window.__pwned=4">x</a>',
+  ']]><foreignObject><iframe src="https://example.invalid/"></iframe></foreignObject>',
+  '&amp; &lt;b&gt; <!-- -->',
+];
+const evil = (i) => PAYLOADS[i % PAYLOADS.length];
+
+// 生长区里出现的元素种类和带事件属性、外部地址的元素
+const GROWTH_SCAN = `(root) => {
+  const tags = new Set();
+  const bad = [];
+  root.querySelectorAll('*').forEach((el) => {
+    tags.add(el.localName);
+    for (const a of el.attributes) {
+      if (/^on/i.test(a.name)) bad.push(el.localName + ' ' + a.name);
+      if (/href$|^src$/i.test(a.name) && !/^#/.test(a.value)) bad.push(el.localName + ' ' + a.name + '=' + a.value);
+    }
+  });
+  return { tags: [...tags].sort(), bad };
+}`;
+
+async function scanAllLessons(page, lessons) {
+  const tags = new Set();
+  const bad = [];
+  for (const l of lessons) {
+    await showLesson(page, l.id);
+    const r = await page.locator('#growth').evaluate((root, src) => eval(src)(root), GROWTH_SCAN);
+    r.tags.forEach((x) => tags.add(x));
+    bad.push(...r.bad);
+  }
+  return { tags, bad };
+}
+
+test('G15 恶意数据：节点、连线、标注、分组、版本、事件里的 HTML 不执行、不产生元素，导出的 SVG 是干净的 XML', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+
+  // 对照：同一份样例原样渲染时生长区里有哪些元素
+  const plainPage = await open(t, b.browser);
+  const baseline = await scanAllLessons(plainPage.page, data.lessons);
+  assert.deepEqual(baseline.bad, []);
+
+  const dir = makeCourseDir('all-cards');
+  let k = 0;
+  rewriteData(path.join(dir, 'course-data.js'), (d) => {
+    const dg = d.growth.find((g) => g.kind === 'diagram');
+    dg.title = evil(k++);
+    dg.nodes.forEach((n) => { n.label = evil(k++); });
+    dg.edges.forEach((e) => { e.label = evil(k++); });
+    dg.annotations.forEach((a) => { a.text = evil(k++); });
+    dg.groups.forEach((g) => { g.label = evil(k++); });
+    d.growth.find((g) => g.kind === 'code').versions.forEach((v) => { v.label = evil(k++); v.note = evil(k++); v.code = evil(k++); });
+    const tl = d.growth.find((g) => g.kind === 'timeline');
+    tl.metricLabel = evil(k++);
+    tl.events.forEach((e) => { e.title = evil(k++); e.detail = evil(k++); });
+  });
+  const opened = await openPage(b.browser, fileUrl(path.join(dir, 'course.html')));
+  t.after(() => opened.context.close());
+  const { page, requests, consoleErrors } = opened;
+  await page.locator('#lessons li').first().waitFor({ timeout: 8000 });
+
+  const scan = await scanAllLessons(page, data.lessons);
+  assert.deepEqual(scan.bad, []);
+  const extra = [...scan.tags].filter((x) => !baseline.tags.has(x));
+  assert.deepEqual(extra, [], `出现了对照里没有的元素：${extra.join(', ')}`);
+  for (const tag of ['img', 'script', 'iframe', 'foreignobject', 'a']) assert.equal(scan.tags.has(tag), false, tag);
+  assert.equal(await page.evaluate(() => window.__pwned), undefined);
+  // 文字原样显示出来了，说明确实渲染过这些字段
+  await showLesson(page, 'wrap');
+  const growthText = await page.locator('#growth').evaluate((el) => el.textContent);
+  assert.ok(growthText.includes('<img src=x'), '节点标签没有按文字显示');
+  assert.ok(growthText.includes('</svg><script>'), '标签没有按文字显示');
+  assert.deepEqual(consoleErrors, []);
+
+  // 导出的 SVG：合法 XML，没有 script、事件属性和外部链接
+  const [svg] = await Promise.all([page.waitForEvent('download'), page.locator('[data-export="svg"]').click()]);
+  const text = readFileSync(await svg.path(), 'utf8');
+  assert.doesNotMatch(text, /<script/i);
+  assert.doesNotMatch(text, /<(img|iframe|foreignObject)\b/i);
+  const parsed = await page.evaluate((src) => {
+    const doc = new DOMParser().parseFromString(src, 'image/svg+xml');
+    const err = doc.querySelector('parsererror');
+    if (err) return { error: err.textContent };
+    const bad = [];
+    let count = 0;
+    doc.querySelectorAll('*').forEach((el) => {
+      count++;
+      if (el.localName.toLowerCase() === 'script') bad.push('script');
+      for (const a of el.attributes) {
+        if (/^on/i.test(a.name)) bad.push(el.localName + ' ' + a.name);
+        if (/href$|^src$/i.test(a.name) && !/^#/.test(a.value)) bad.push(el.localName + ' ' + a.name + '=' + a.value);
+      }
+    });
+    return { root: doc.documentElement.localName, bad, count, text: doc.documentElement.textContent };
+  }, text);
+  assert.equal(parsed.error, undefined, parsed.error);
+  assert.equal(parsed.root, 'svg');
+  assert.ok(parsed.count > 5);
+  assert.deepEqual(parsed.bad, []);
+  assert.ok(parsed.text.includes('<img src=x'), '导出的 SVG 里标签应是文字');
+  await page.waitForTimeout(300);
+  assert.ok(requests.every((u) => u.startsWith('file:') || u.startsWith('blob:')), requests.join('\n'));
+  assert.equal(await page.evaluate(() => window.__pwned), undefined);
 });

@@ -36,6 +36,6 @@ test('模板的 lesson-guide 写明模拟面试结束后统一点评', () => {
 });
 
 test('写明面试题同时算作本课的检验', () => {
-  assert.match(all, /practice/);
-  assert.match(all, /检验/);
+  // TEMPLATE.md 正文里要有这句明确的话，不能只是在别处碰巧出现「practice」和「检验」两个词
+  assert.ok(files[0].includes('课中抛出的每一道面试题都是一次检验，记进本课的 `practice` 卡，参与「已掌握」和待回顾；不另外出检验题。'));
 });
