@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -254,7 +254,7 @@ test('宿主的全局在沙箱里看不到，沙箱里的 window 是沙箱自己
   assert.deepEqual(loadOldCourse(path.join(dir, 'course-data.js')).g, ['undefined', 'undefined', 'undefined', 'object']);
 });
 
-test('转成 JSON 的过程也受限时约束：getter 死循环、toJSON 死循环、抛出带 getter 的对象都在限时内正常报错', () => {
+test('转成 JSON 的过程也受限时约束：getter 死循环、toJSON 死循环、抛出 message 带 getter 的对象都在限时内正常报错', () => {
   for (const body of [
     'window.INTERVIEW_COURSE = { get x() { while (true) {} } };',
     'window.INTERVIEW_COURSE = { toJSON() { while (true) {} } };',
@@ -268,6 +268,58 @@ test('转成 JSON 的过程也受限时约束：getter 死循环、toJSON 死循
     assert.doesNotMatch(r.stderr, /\n\s+at /);
     assert.ok(Date.now() - t0 < 10000, body);
   }
+});
+
+// 异步跑命令行，几个会卡住的用例可以并行；自带超时，卡住了也只是这条用例失败，不会拖住整个测试
+function runAsync(src, home, limitMs = 20000) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const child = spawn(process.execPath, [script, src, home], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const timer = setTimeout(() => child.kill('SIGKILL'), limitMs);
+    child.on('close', (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stdout, stderr, ms: Date.now() - t0 });
+    });
+  });
+}
+
+const VALID = `window.INTERVIEW_COURSE = { ${MIN.replace('lessons: []', 'lessons: [{ id: "a", title: "A", summary: "s", status: "current" }]')} };`;
+const SPIN = 'while (true) {}';
+const HANG_CASES = {
+  '抛出的普通对象，stack 是死循环 getter': 'throw { get stack() { while (true) {} } };',
+  '抛出的 Proxy，get 陷阱死循环': 'throw new Proxy({}, { get() { while (true) {} } });',
+  '抛出的 Error，stack 被改成死循环 getter': 'var e = new Error("x"); Object.defineProperty(e, "stack", { get() { while (true) {} } }); throw e;',
+  '微任务死循环，后面接着赋合法的课程': `Promise.resolve().then(() => { ${SPIN} });\n${VALID}`,
+  '微任务死循环，后面接着 throw': `Promise.resolve().then(() => { ${SPIN} });\nthrow new Error('x');`,
+};
+
+test('旧文件能让宿主卡住的各种写法：限时内以 ✗ 失败、退出 1，没有堆栈，什么都不留', { timeout: 60000 }, async () => {
+  const names = Object.keys(HANG_CASES);
+  const results = await Promise.all(names.map((n) => {
+    const home = path.join(tmp(), 'courses');
+    return runAsync(writeOld(HANG_CASES[n]), home).then((r) => ({ ...r, home }));
+  }));
+  results.forEach((r, i) => {
+    const name = names[i];
+    assert.equal(r.signal, null, `${name}：被测试超时杀掉了，说明命令行自己没有按时退出`);
+    assert.equal(r.status, 1, name);
+    assert.ok(r.ms < 12000, `${name}：用了 ${r.ms} 毫秒`);
+    assert.match(r.stderr, /✗/, name);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, name);
+    assert.equal(r.stdout, '', name);
+    assert.ok(!existsSync(r.home), name);
+  });
+});
+
+test('微任务：正常跑完的微任务不受影响，卡住的微任务让这次读取失败（不管后面有没有合法的课程）', () => {
+  const ok = writeOld(`Promise.resolve().then(() => { window.INTERVIEW_COURSE.later = 1; });\n${VALID}`);
+  assert.equal(loadOldCourse(path.join(ok, 'course-data.js')).later, 1);
+  const bad = writeOld(HANG_CASES['微任务死循环，后面接着赋合法的课程']);
+  assert.throws(() => loadOldCourse(path.join(bad, 'course-data.js')), /✗|无法读取旧课程文件/);
 });
 
 test('旧文件没有赋值、或赋的值转成 JSON 后是 undefined：正常报错', () => {

@@ -5,10 +5,9 @@
 // 写入失败时清掉这次创建的东西，index-data.js 恢复原样。
 // 成功时 stdout 只有一行数量；错误和警告写到 stderr。
 // 退出码：0 成功，1 读不了源文件、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { types } from 'node:util';
-import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
 import { readDataFile, writeDataFile } from './lib/data-file.mjs';
@@ -28,39 +27,34 @@ export class MigrateError extends Error {
 }
 
 // 旧课程文件是 JavaScript（键不加引号、有注释和尾逗号、用 join 拼多行字符串），不是 JSON。
-// 整个项目只有这里执行数据文件。上下文是一个没有任何宿主对象的空对象，window 在上下文里面创建
-// （否则 window.constructor.constructor 能拿到宿主的 Function，进而拿到 process）；
-// 执行和 JSON.stringify 都在上下文里、受同一个限时约束；从上下文到宿主的只有一个字符串，在宿主里 JSON.parse。
-const LOAD_TIMEOUT_MS = 2000;
-
-// 沙箱里抛出的东西不可信：对象可能带 getter 或是 Proxy，读它会在宿主里不受限时地执行沙箱代码。
-// 只从真正的原生 Error 的自有数据属性里取 message，其余一律不碰。
-function safeMessage(e) {
-  if (!types.isNativeError(e)) return '';
-  const d = Object.getOwnPropertyDescriptor(e, 'message');
-  return d && typeof d.value === 'string' ? d.value : '';
-}
+// 整个项目只有 old-course-worker.mjs 执行它，而且是在短命的子进程里：进程内的 vm 限时管不住旧文件能让宿主做的所有事
+// （getter、Proxy、抛出对象的 stack、微任务），所以父进程只给子进程一个硬性的墙钟限时，超时直接 SIGKILL。
+// 从子进程到这里的只有 stdout 里的一个 JSON 字符串。超时、被信号杀掉、退出码非 0、没有输出、输出不是 JSON 对象，一律是 MigrateError。
+const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib/old-course-worker.mjs');
+const HARD_LIMIT_MS = 5000;
+const MAX_OUTPUT = 64 * 1024 * 1024;
 
 export function loadOldCourse(file) {
-  const source = readFileSync(file, 'utf8');
-  const ctx = vm.createContext(Object.create(null), { codeGeneration: { strings: false, wasm: false } });
-  let json;
-  try {
-    vm.runInContext('var window = {};', ctx);
-    vm.runInContext(source, ctx, { timeout: LOAD_TIMEOUT_MS });
-    json = vm.runInContext('JSON.stringify(window.INTERVIEW_COURSE)', ctx, { timeout: LOAD_TIMEOUT_MS });
-  } catch (e) {
-    const m = safeMessage(e);
-    throw new MigrateError(`无法读取旧课程文件 ${file}${m ? `：${m}` : '（执行出错、超时，或内容无法转成 JSON）'}`);
+  const abs = path.resolve(file);
+  const r = spawnSync(process.execPath, [WORKER, abs], {
+    encoding: 'utf8',
+    timeout: HARD_LIMIT_MS,
+    killSignal: 'SIGKILL',
+    maxBuffer: MAX_OUTPUT,
+  });
+  const why = (reason) => new MigrateError(`无法读取旧课程文件 ${abs}：${reason}`);
+  if (r.error) {
+    throw why(r.error.code === 'ETIMEDOUT' ? `执行超过 ${HARD_LIMIT_MS / 1000} 秒，已终止` : `无法运行读取进程（${r.error.code || r.error.message}）`);
   }
-  if (typeof json !== 'string') throw new MigrateError(`${file} 没有给 window.INTERVIEW_COURSE 赋一个可以转成 JSON 的对象`);
+  if (r.signal) throw why(`读取进程被信号 ${r.signal} 终止`);
+  if (r.status !== 0) throw why(String(r.stderr).trim().split('\n')[0] || `读取进程退出码 ${r.status}`);
   let course;
   try {
-    course = JSON.parse(json);
+    course = JSON.parse(r.stdout);
   } catch {
-    throw new MigrateError(`${file} 里的 window.INTERVIEW_COURSE 无法转成 JSON`);
+    throw why('读取进程没有给出可解析的 JSON');
   }
-  if (!isObj(course)) throw new MigrateError(`${file} 没有给 window.INTERVIEW_COURSE 赋一个对象`);
+  if (!isObj(course)) throw why('window.INTERVIEW_COURSE 不是一个对象');
   return course;
 }
 
