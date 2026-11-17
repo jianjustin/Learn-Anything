@@ -1,7 +1,7 @@
 // 页面测试辅助：找到 playwright-core，启动本机 Chrome（退回 playwright 自带的 Chromium），
 // 在临时目录里搭好课程目录，打开页面并收集请求和报错。
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +70,48 @@ export function makeCourseDir(fixtureName, { root, slug } = {}) {
   copyFileSync(path.join(ASSETS_DIR, 'course.html'), path.join(dir, 'course.html'));
   copyFileSync(fixture(fixtureName), path.join(dir, 'course-data.js'));
   return dir;
+}
+
+// 搭一个课程总目录：index.html、index-data.js 和若干课程子目录，返回路径。
+// courses 的每一项：
+//   slug     登记用的 slug，也是目录名（除非给了 dir）
+//   fixture  数据来自 tests/fixtures 里的哪个样例，默认 'valid-minimal'
+//   dir      目录名，默认等于 slug
+//   mutate   (data) => void，改完再写入 course-data.js
+//   raw      直接作为 course-data.js 的全部内容（用来造语法错误等）
+//   create   false：只登记，不建目录
+//   register false：只建目录，不登记
+// options.entries 是原样追加到 index-data.js 的登记项（用来造不安全的 dir）；
+// options.index 为 false 时不写 index-data.js。
+export function makeHomeDir(courses = [], { index = true, entries = [] } = {}) {
+  const home = mkdtempSync(path.join(os.tmpdir(), '学习 总览-'));
+  const registered = [];
+  for (const spec of courses) {
+    const dir = spec.dir ?? spec.slug;
+    if (spec.create !== false) {
+      const full = path.join(home, dir);
+      mkdirSync(full, { recursive: true });
+      copyFileSync(path.join(ASSETS_DIR, 'course.html'), path.join(full, 'course.html'));
+      const file = path.join(full, 'course-data.js');
+      if (spec.raw !== undefined) {
+        writeFileSync(file, spec.raw);
+      } else {
+        copyFileSync(fixture(spec.fixture || 'valid-minimal'), file);
+        if (spec.mutate) rewriteData(file, spec.mutate);
+      }
+    }
+    if (spec.register !== false) registered.push({ slug: spec.slug, dir });
+  }
+  const indexFile = path.join(home, 'index-data.js');
+  const htmlFile = path.join(home, 'index.html');
+  copyFileSync(path.join(ASSETS_DIR, 'index.html'), htmlFile);
+  if (index) writeIndexData(indexFile, [...registered, ...entries]);
+  return { home, indexFile, htmlFile };
+}
+
+// 写 index-data.js（原子替换）
+export function writeIndexData(file, courses) {
+  writeDataFile(file, 'LEARN_INDEX', { version: 1, courses });
 }
 
 // 打开页面，收集 console 报错、未捕获的异常和全部请求地址
