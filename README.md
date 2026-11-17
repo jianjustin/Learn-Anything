@@ -33,6 +33,8 @@ bash install.sh --courses-dir <courses directory>
 
 The plugin loads straight from the repository's source directory, so later changes in the repository take effect in the next session. Start a new session after installing.
 
+**Re-running is safe.** For each directory the script first looks at the current state with two read-only commands, `claude plugin marketplace list --json` and `claude plugin list --json`. A marketplace that is already added is not added again, and a plugin that is already installed (user scope) is not installed again. `configure` always runs when `--courses-dir` is given. So to change the courses directory, just re-run `bash install.sh --courses-dir <new directory>`. If the state cannot be read (the command fails or its output is not understood), the script does not guess and goes ahead with the add and install.
+
 Which configuration directories are handled:
 
 - Without `--config-dir`: Claude Code's default directory (`~/.claude`); `~/.claude-ccswitch` if it exists; and the directory named by the `CLAUDE_CONFIG_DIR` environment variable, if it is set and differs from the first two.
@@ -41,9 +43,9 @@ Which configuration directories are handled:
 
 Other options:
 
-- `--dry-run`: print the commands that would run (one per line, each starting with `+ `) without running them. Use it to see what the script will do.
-- `--uninstall`: for each configuration directory, uninstall the plugin and remove the marketplace. It does not touch any file in your courses directory.
-- The script exits with code 2 on an unknown argument or a courses directory that is not an absolute path, and with code 1 when `claude` cannot be found or node is older than 20.
+- `--dry-run`: print the commands that would run (one per line, each starting with `+ `) without running them. Use it to see what the script will do. The two read-only list commands above are printed too, and the `add` and `install` lines end with a note that they are skipped if already present, meaning a real run will not execute them when the state is already satisfied.
+- `--uninstall`: for each configuration directory, uninstall the plugin and remove the marketplace, skipping a step whose target is already gone. It does not touch any file in your courses directory.
+- The script exits with code 2 on an unknown argument, or a `--courses-dir` value that is empty or not an absolute path. It exits with code 1 when `claude` cannot be found, node is older than 20, `HOME` is not set, or a command fails. A failure in one configuration directory does not stop the others, and the failing directory is named in the output.
 
 ## Where courses are stored
 

@@ -33,6 +33,8 @@ bash install.sh --courses-dir <课程目录>
 
 plugin 直接从仓库源目录加载，之后仓库里的改动在下次会话生效。安装完成后开一个新会话。
 
+**重复运行是安全的。** 每个目录先用只读命令 `claude plugin marketplace list --json` 和 `claude plugin list --json` 看现状：marketplace 已经添加就不再添加，plugin 已经安装（user 范围）就不再安装；给了 `--courses-dir` 时 `configure` 总会执行。所以改课程目录只要重新运行 `bash install.sh --courses-dir <新目录>`。读不出现状（命令失败或输出看不懂）时不猜，照常添加和安装。
+
 处理哪些配置目录：
 
 - 不给 `--config-dir` 时：Claude Code 的默认目录（`~/.claude`）；`~/.claude-ccswitch`（存在时）；环境变量 `CLAUDE_CONFIG_DIR` 指向的目录（已设置且不同于前两者时）。
@@ -41,9 +43,9 @@ plugin 直接从仓库源目录加载，之后仓库里的改动在下次会话�
 
 其他选项：
 
-- `--dry-run`：只打印要执行的命令（每条一行，以 `+ ` 开头），不执行。想先看看会做什么时用它。
-- `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace。不会动课程目录里的任何文件。
-- 参数不认识、课程目录不是绝对路径时，脚本以退出码 2 退出；找不到 `claude`，或 node 低于 20 时，以退出码 1 退出。
+- `--dry-run`：只打印要执行的命令（每条一行，以 `+ ` 开头），不执行。想先看看会做什么时用它。上面两条只读的 list 命令也会打印出来；`add` 和 `install` 行末标注「已添加（已安装）则跳过」，表示真正运行时现状已经满足就不会执行。
+- `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace，已经不在的那一步跳过。不会动课程目录里的任何文件。
+- 参数不认识、`--courses-dir` 的值为空或不是绝对路径时，脚本以退出码 2 退出；找不到 `claude`、node 低于 20、`HOME` 没有设置、或者某条命令失败时，以退出码 1 退出。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
 
 ## 课程存在哪
 

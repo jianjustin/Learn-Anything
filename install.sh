@@ -10,7 +10,11 @@
 #   --dry-run                 只打印命令（每条一行，以 "+ " 开头），不执行
 #
 # 默认配置目录（~/.claude）的命令不加前缀；其他目录的命令加 CLAUDE_CONFIG_DIR=<目录> 前缀。
-# 退出码：0 成功，1 缺少 claude 或 node、或某条命令失败，2 参数不对。
+# 重复运行是安全的：每个目录先用 claude plugin marketplace list --json 和 claude plugin list --json（只读）查看现状，
+# marketplace 已添加就不再添加，plugin 已安装就不再安装；给了 --courses-dir 时 configure 总会执行。
+# 卸载同理：目标已经不在就跳过那一步。读不出现状（命令失败或输出看不懂）时不猜：安装当作「还没有」照常添加和安装，
+# 卸载当作「还在」照常卸载。--dry-run 也会打印这两条只读命令，并把 add、install、uninstall、remove 标注为「已存在（已不在）则跳过」。
+# 退出码：0 成功，1 缺少 claude 或 node、HOME 不可用、或某条命令失败，2 参数不对。
 set -u
 
 MARKETPLACE=learn-anything-local
@@ -50,6 +54,7 @@ trim_slash() {
 
 # 参数 ------------------------------------------------------------------
 courses_dir=
+courses_given=0
 config_dirs=()
 uninstall=0
 dry_run=0
@@ -59,10 +64,12 @@ while [ $# -gt 0 ]; do
     --courses-dir)
       [ $# -ge 2 ] || die_usage "--courses-dir 需要一个路径"
       courses_dir=$2
+      courses_given=1
       shift 2
       ;;
     --courses-dir=*)
       courses_dir=${1#--courses-dir=}
+      courses_given=1
       shift
       ;;
     --config-dir)
@@ -81,7 +88,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ -n "$courses_dir" ]; then
+if [ "$courses_given" -eq 1 ]; then
+  [ -n "$courses_dir" ] || die_usage "--courses-dir 的值不能为空"
   [ "$uninstall" -eq 0 ] || die_usage "--courses-dir 只在安装时使用，不能与 --uninstall 同用"
   case $courses_dir in
     /*) ;;
@@ -104,6 +112,15 @@ while [ "$i" -lt "${#config_dirs[@]}" ]; do
 done
 
 # 环境检查 --------------------------------------------------------------
+# 默认配置目录是 $HOME/.claude；HOME 没设置或不是绝对路径时，算出来的会是 /.claude 之类，不能往下走
+case ${HOME:-} in
+  /*) ;;
+  *)
+    echo "HOME 没有设置，或者不是绝对路径（当前值：${HOME:-<未设置>}）：无法确定默认的 Claude Code 配置目录。" >&2
+    exit 1
+    ;;
+esac
+
 if ! command -v claude >/dev/null 2>&1; then
   echo "找不到 claude 命令：请先安装 Claude Code，并确认 claude 在 PATH 里。" >&2
   exit 1
@@ -183,34 +200,92 @@ json_escape() {
 }
 
 failed=0
+failed_dirs=
 
-# claude_step <配置目录，空表示默认> <标准输入内容，空表示没有> <claude 的参数>...
-# dry-run 只打印；否则执行，失败时返回非 0
-claude_step() {
+# 组装命令行显示用的文字（不含 "+ " 前缀）
+# claude_line <配置目录，空表示默认> <标准输入内容，空表示没有> <claude 的参数>...
+claude_line() {
   local dir=$1 input=$2 line= a
   shift 2
-  if [ "$dry_run" -eq 1 ]; then
-    [ -n "$input" ] && line="printf %s $(shquote "$input") | "
-    [ -n "$dir" ] && line="${line}CLAUDE_CONFIG_DIR=$(shquote "$dir") "
-    line="${line}claude"
-    for a in "$@"; do line="$line $(shquote "$a")"; done
-    echo "+ $line"
-    return 0
-  fi
+  [ -n "$input" ] && line="printf %s $(shquote "$input") | "
+  [ -n "$dir" ] && line="${line}CLAUDE_CONFIG_DIR=$(shquote "$dir") "
+  line="${line}claude"
+  for a in "$@"; do line="$line $(shquote "$a")"; done
+  printf '%s' "$line"
+}
+
+# 真正执行一条 claude 命令；不带标准输入内容时，标准输入接空设备，免得 claude 去读终端
+# claude_exec <配置目录，空表示默认> <标准输入内容，空表示没有> <claude 的参数>...
+claude_exec() {
+  local dir=$1 input=$2
+  shift 2
   if [ -n "$dir" ]; then
     if [ -n "$input" ]; then
       printf '%s' "$input" | env "CLAUDE_CONFIG_DIR=$dir" claude "$@"
     else
-      env "CLAUDE_CONFIG_DIR=$dir" claude "$@"
+      env "CLAUDE_CONFIG_DIR=$dir" claude "$@" </dev/null
     fi
   else
     if [ -n "$input" ]; then
       printf '%s' "$input" | claude "$@"
     else
-      claude "$@"
+      claude "$@" </dev/null
     fi
   fi
 }
+
+# 一步：dry-run 只打印（note 非空时作为行尾注释），否则执行，失败时返回非 0
+# claude_step <配置目录> <标准输入内容> <note> <claude 的参数>...
+claude_step() {
+  local dir=$1 input=$2 note=$3
+  shift 3
+  if [ "$dry_run" -eq 1 ]; then
+    if [ -n "$note" ]; then echo "+ $(claude_line "$dir" "$input" "$@")  # $note"; else echo "+ $(claude_line "$dir" "$input" "$@")"; fi
+    return 0
+  fi
+  claude_exec "$dir" "$input" "$@"
+}
+
+# 读出现状（只读）。结果放在 state：0 在，1 不在，2 读不出来（命令失败或输出看不懂）
+# dry-run 只打印命令，state 记为 2。
+# claude_state <配置目录> marketplace|plugin <名字或 id>
+claude_state() {
+  local dir=$1 kind=$2 want=$3 out rc
+  local -a cmd
+  if [ "$kind" = marketplace ]; then cmd=(plugin marketplace list --json); else cmd=(plugin list --json); fi
+  if [ "$dry_run" -eq 1 ]; then
+    echo "+ $(claude_line "$dir" "" "${cmd[@]}")  # 只读：看是否已有 $want"
+    state=2
+    return 0
+  fi
+  if ! out=$(claude_exec "$dir" "" "${cmd[@]}" 2>/dev/null); then
+    state=2
+    return 0
+  fi
+  # 只认 JSON 数组：marketplace 看 name；plugin 看 id，并且要装在 user 范围
+  printf '%s' "$out" | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+      try {
+        const [kind, want] = process.argv.slice(1);
+        const list = JSON.parse(s);
+        if (!Array.isArray(list)) process.exit(2);
+        const hit = list.some((x) => x !== null && typeof x === "object" && (kind === "marketplace" ? x.name === want : x.id === want && x.scope === "user"));
+        process.exit(hit ? 0 : 1);
+      } catch {
+        process.exit(2);
+      }
+    });
+  ' "$kind" "$want" 2>/dev/null
+  rc=$?
+  case $rc in
+    0|1) state=$rc ;;
+    *) state=2 ;;
+  esac
+  return 0
+}
+
+state=2
 
 if [ "$uninstall" -eq 0 ] && [ "$dry_run" -eq 0 ] && [ -n "$courses_dir" ] && [ ! -d "$courses_dir" ]; then
   echo "提示：课程目录 $courses_dir 还不存在，请先创建它。" >&2
@@ -222,29 +297,59 @@ else
   values=
 fi
 
+# 记一次失败：立刻说明是哪个配置目录的哪一步
+fail_step() {
+  failed=1
+  case " $failed_dirs " in
+    *" $label "*) ;;
+    *) failed_dirs="$failed_dirs $label" ;;
+  esac
+  echo "✗ $label：$1 失败" >&2
+}
+
 i=0
 while [ "$i" -lt "${#targets[@]}" ]; do
   dir=${targets[$i]}
   i=$((i + 1))
-  if [ "$dry_run" -eq 0 ]; then
-    if [ -n "$dir" ]; then echo "== 配置目录 $dir =="; else echo "== 默认配置目录 =="; fi
-  fi
+  if [ -n "$dir" ]; then label="配置目录 $dir"; else label="默认配置目录"; fi
+  [ "$dry_run" -eq 1 ] || echo "== $label =="
   if [ "$uninstall" -eq 1 ]; then
-    # 两步互不依赖：plugin 没装上时仍要移除 marketplace
-    claude_step "$dir" "" plugin uninstall "$PLUGIN" --scope user || failed=1
-    claude_step "$dir" "" plugin marketplace remove "$MARKETPLACE" || failed=1
+    # 目标已经不在就跳过；两步互不依赖：plugin 没装上时仍要移除 marketplace
+    claude_state "$dir" plugin "$PLUGIN"
+    if [ "$dry_run" -eq 0 ] && [ "$state" -eq 1 ]; then
+      echo "plugin $PLUGIN 已不在，跳过卸载"
+    else
+      claude_step "$dir" "" "已不在则跳过" plugin uninstall "$PLUGIN" --scope user || fail_step "卸载 plugin"
+    fi
+    claude_state "$dir" marketplace "$MARKETPLACE"
+    if [ "$dry_run" -eq 0 ] && [ "$state" -eq 1 ]; then
+      echo "marketplace $MARKETPLACE 已不在，跳过移除"
+    else
+      claude_step "$dir" "" "已不在则跳过" plugin marketplace remove "$MARKETPLACE" || fail_step "移除 marketplace"
+    fi
   else
-    # 后一步依赖前一步，失败就跳过这个目录剩下的步骤，继续下一个目录
-    claude_step "$dir" "" plugin marketplace add "$repo_root" || { failed=1; continue; }
-    claude_step "$dir" "" plugin install "$PLUGIN" --scope user || { failed=1; continue; }
+    # 已有的不重复添加、安装，重复运行才安全。读不出现状（state 为 2）时照常添加和安装。
+    # 后一步依赖前一步：添加或安装失败就跳过这个目录剩下的步骤，继续下一个目录
+    claude_state "$dir" marketplace "$MARKETPLACE"
+    if [ "$dry_run" -eq 0 ] && [ "$state" -eq 0 ]; then
+      echo "marketplace $MARKETPLACE 已添加，跳过"
+    else
+      claude_step "$dir" "" "已添加则跳过" plugin marketplace add "$repo_root" || { fail_step "添加 marketplace"; continue; }
+    fi
+    claude_state "$dir" plugin "$PLUGIN"
+    if [ "$dry_run" -eq 0 ] && [ "$state" -eq 0 ]; then
+      echo "plugin $PLUGIN 已安装，跳过"
+    else
+      claude_step "$dir" "" "已安装则跳过" plugin install "$PLUGIN" --scope user || { fail_step "安装 plugin"; continue; }
+    fi
     if [ -n "$values" ]; then
-      claude_step "$dir" "$values" plugin configure "$PLUGIN" --values-stdin || failed=1
+      claude_step "$dir" "$values" "" plugin configure "$PLUGIN" --values-stdin || fail_step "配置 courses_dir"
     fi
   fi
 done
 
 if [ "$failed" -ne 0 ]; then
-  echo "有命令执行失败，见上面的输出。" >&2
+  echo "有命令执行失败：${failed_dirs# }。见上面的输出。" >&2
   exit 1
 fi
 exit 0
