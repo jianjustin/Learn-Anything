@@ -1062,11 +1062,24 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     return false;
   }
 
+  // 候选线的每个点都要在画布内；往下绕的横线（比两个端点节点的底边都低）下方还要留出连线标签的高度，
+  // 页面把标签画在线的下方。画布按 mayDetour 预留高度，小数位置下 mayDetour 不成立的两个节点之间也可能有挡路的节点，
+  // 这时往下的候选线放不下，直接丢掉
+  function insideCanvas(c, a, b, size) {
+    var low = Math.max(a.y + a.h, b.y + b.h);
+    for (var i = 0; i < c.length; i++) {
+      if (c[i].x < 0 || c[i].x > size.width || c[i].y < 0 || c[i].y > size.height) return false;
+      if (i > 0 && c[i].y === c[i - 1].y && c[i].y > low && c[i].y + LABEL_BELOW > size.height) return false;
+    }
+    return true;
+  }
+
   // 直线穿过别的节点时换成一条绕行线（只压到标注不绕，标注是不透明的小标签，叠在线上面）。
   // 候选依次要求：不穿过节点和标注、也不和已有的横竖线重合 → 不穿过节点和标注 → 不穿过节点；都不行时保留直线。
   // taken 是已经定下来的横竖线段，选中的绕行线也加进去
-  function detour(a, b, straight, solid, chipRects, taken) {
-    var candidates = detourCandidates(a, b), all = solid.concat(chipRects);
+  function detour(a, b, straight, solid, chipRects, taken, size) {
+    var candidates = detourCandidates(a, b).filter(function (c) { return insideCanvas(c, a, b, size); });
+    var all = solid.concat(chipRects);
     var tests = [
       function (c) { return !pathHits(c, all) && !sharesLane(c, taken); },
       function (c) { return !pathHits(c, all); },
@@ -1104,7 +1117,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   }
 
   // 两个节点的矩形相交（只贴边不算）就是重叠。整数位置下，矩形相交等于占了同一格。
-  // 每处重叠报一条：取相交区域的中心点，把盖着这个点的所有节点列在一起；左上角的位置按网格单位报
+  // 每处重叠报一条：取相交区域的中心点，把盖着这个点的所有节点列在一起；整数位置下报占的那一格
   var OVERLAP_EPS = 1e-6;
   function diagramWarnings(panel, nodes, annotations) {
     var warnings = [], reported = Object.create(null);
@@ -1132,7 +1145,9 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         reported[names] = true;
         var col = Math.max.apply(null, group.map(function (m) { return m.col; }));
         var row = Math.max.apply(null, group.map(function (m) { return m.row; }));
-        warnings.push(prefix + '节点 ' + names + ' 占同一格（第 ' + round(col) + ' 列、第 ' + round(row) + ' 行）');
+        // 全是整数位置：重叠就是占了同一格，措辞不变；有小数位置时只是框有一部分相交
+        var whole = group.every(function (m) { return Number.isInteger(m.col) && Number.isInteger(m.row); });
+        warnings.push(prefix + '节点 ' + names + (whole ? ' 占同一格（第 ' + col + ' 列、第 ' + row + ' 行）' : ' 的框相交'));
       });
     });
     var count = Object.create(null);
@@ -1213,7 +1228,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       var r = routes[i];
       return {
         from: e.from, to: e.to, label: e.label || '', style: e.style || 'solid',
-        points: r.blocked ? detour(r.a, r.b, r.straight, r.solid, annotations, taken) : r.straight, isNew: fresh(e)
+        points: r.blocked ? detour(r.a, r.b, r.straight, r.solid, annotations, taken, size) : r.straight, isNew: fresh(e)
       };
     });
 

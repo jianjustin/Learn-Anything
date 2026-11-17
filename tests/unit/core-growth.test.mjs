@@ -379,11 +379,13 @@ const fracAt = (p) => plain(C.diagramAt(p, [{ id: 'l1' }], 'l1'));
 const fn = (id, col, row, extra = {}) => ({ id, label: id.toUpperCase(), col, row, since: 'l1', ...extra });
 const crossesAny = (pts, s, skip) => s.nodes.filter((n) => !skip.includes(n.id)).some((n) => pathCrosses(pts, n, 0));
 
-test('同格警告的措辞：整数位置报「第 c 列、第 r 行」，小数位置报重叠区域左上角的位置', () => {
-  const w1 = fracAt(frac([fn('a', 1, 1), fn('d', 1, 1)])).warnings;
-  assert.deepEqual(w1, ['图「t」：节点 a、d 占同一格（第 1 列、第 1 行）']);
-  const w2 = fracAt(frac([fn('a', 1, 1), fn('b', 1.5, 1.25)])).warnings;
-  assert.deepEqual(w2, ['图「t」：节点 a、b 占同一格（第 1.5 列、第 1.25 行）']);
+test('重叠警告的措辞：整数位置占同一格，措辞不变；有小数位置只说框相交，列出两个节点的 id', () => {
+  assert.deepEqual(fracAt(frac([fn('a', 1, 1), fn('d', 1, 1)])).warnings, ['图「t」：节点 a、d 占同一格（第 1 列、第 1 行）']);
+  // 整数位置的跨列节点：照旧按占到的那一格报
+  assert.deepEqual(fracAt(frac([fn('a', 1, 1, { span: 2 }), fn('d', 2, 1)])).warnings, ['图「t」：节点 a、d 占同一格（第 2 列、第 1 行）']);
+  assert.deepEqual(fracAt(frac([fn('a', 1, 1), fn('b', 1.5, 1.25)])).warnings, ['图「t」：节点 a、b 的框相交']);
+  // 一个整数、一个小数，也是框相交
+  assert.deepEqual(fracAt(frac([fn('a', 2, 2), fn('x', 2, 2.25)])).warnings, ['图「t」：节点 a、x 的框相交']);
 });
 
 test('只贴边不算重叠', () => {
@@ -432,4 +434,61 @@ test('半行错开的上下两个节点之间的连线是斜线或折线，不�
   const p = frac([fn('a', 1, 1), fn('m', 1.5, 2), fn('b', 2, 3)], [{ from: 'a', to: 'b', since: 'l1' }]);
   const s = fracAt(p);
   assert.ok(!crossesAny(s.edges[0].points, s, ['a', 'b']));
+});
+
+// ---- 小数位置下的连线不出画布 ----
+const allInside = (s, msg) => {
+  for (const e of s.edges) for (const q of e.points) {
+    assert.ok(q.x >= 0 && q.x <= s.width && q.y >= 0 && q.y <= s.height, `${msg}：折点 (${q.x}, ${q.y}) 在画布 ${s.width}×${s.height} 外`);
+  }
+};
+
+test('小数位置：没有警告的合法版面里，绕行线不画到画布外（空隙不到一列的同行节点之间有挡路的节点）', () => {
+  for (const [name, nodes] of [
+    ['a(1,2) b(1.85,1.7) m(1.15,1.65)', [fn('a', 1, 2), fn('b', 1.85, 1.7), fn('m', 1.15, 1.65)]],
+    ['a(1,2) b(1.85,2.3) m(1.7,1.95)', [fn('a', 1, 2), fn('b', 1.85, 2.3), fn('m', 1.7, 1.95)]],
+  ]) {
+    const s = fracAt(frac(nodes, [{ from: 'a', to: 'b', since: 'l1' }]));
+    assert.deepEqual(s.warnings, [], name);
+    allInside(s, name);
+  }
+});
+
+test('向下绕的线下面要放得下连线标签：放不下的候选线被丢掉', () => {
+  // 第 1 行两个节点之间隔着一列，m 挡着；画布按 mayDetour 给足下方绕行的高度，标签也放得下
+  const s = fracAt(frac([fn('a', 1, 1), fn('m', 2, 1), fn('b', 3, 1)], [{ from: 'a', to: 'b', label: '标签', since: 'l1' }]));
+  const low = Math.max(...s.nodes.map((n) => n.y + n.h));
+  for (const e of s.edges) {
+    const pts = e.points;
+    pts.slice(1).forEach((q, i) => { if (q.y === pts[i].y && q.y > low) assert.ok(q.y + 20 <= s.height); });
+  }
+  allInside(s, '整数');
+  // 同样的版面，m 错开半行：画布高度和折点仍然满足同一条
+  const t = fracAt(frac([fn('a', 1, 1), fn('m', 2, 1.4), fn('b', 3, 1)], [{ from: 'a', to: 'b', label: '标签', since: 'l1' }]));
+  allInside(t, '小数');
+  const lowT = Math.max(...t.nodes.map((n) => n.y + n.h));
+  t.edges[0].points.slice(1).forEach((q, i, a) => { if (q.y === t.edges[0].points[i].y && q.y > lowT) assert.ok(q.y + 20 <= t.height); });
+});
+
+test('小数位置：互相重叠的节点（有警告）之间的连线也不出画布', () => {
+  for (const nodes of [
+    [fn('a', 1, 2), fn('b', 1.4, 2.2), fn('m', 1.2, 1.9)],
+    [fn('a', 1, 1), fn('b', 1.3, 1.1), fn('m', 1.15, 1.05)],
+    [fn('a', 1.5, 3), fn('b', 2.2, 3.3), fn('m', 1.9, 3.1)],
+  ]) {
+    const s = fracAt(frac(nodes, [{ from: 'a', to: 'b', since: 'l1' }, { from: 'b', to: 'a', since: 'l1' }]));
+    assert.ok(s.warnings.length > 0);
+    allInside(s, JSON.stringify(nodes.map((n) => [n.col, n.row])));
+  }
+});
+
+test('小数位置：随机版面里所有连线的折点都在画布内', () => {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const pos = () => 1 + Math.round(rnd() * 8) / 4; // 1 到 3，步长 0.25
+  for (let t = 0; t < 300; t++) {
+    const nodes = Array.from({ length: 2 + Math.floor(rnd() * 5) }, (_, i) => fn('n' + i, pos(), pos()));
+    const edges = nodes.map((n) => ({ from: n.id, to: nodes[Math.floor(rnd() * nodes.length)].id, since: 'l1' }));
+    allInside(fracAt(frac(nodes, edges)), `第 ${t} 组 ${JSON.stringify(nodes.map((n) => [n.col, n.row]))}`);
+  }
 });

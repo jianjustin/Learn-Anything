@@ -98,16 +98,23 @@ test('网格位置可以是不小于 1 的小数', () => {
   assert.deepEqual(r.errors, []);
 });
 
-for (const [name, patch] of [
-  ['col 小于 1', { col: 0.5 }],
-  ['row 为 0', { row: 0 }],
-  ['col 为负数', { col: -1 }],
-  ['row 不是有限数字', { row: Infinity }],
-  ['col 是字符串', { col: '2' }],
-  ['span 是小数', { span: 1.5 }],
+for (const [name, patch, field] of [
+  ['col 小于 1', { col: 0.5 }, 'col'],
+  ['row 为 0', { row: 0 }, 'row'],
+  ['col 为负数', { col: -1 }, 'col'],
+  ['row 不是有限数字', { row: Infinity }, 'row'],
+  ['col 是字符串', { col: '2' }, 'col'],
+  ['row 是 NaN', { row: NaN }, 'row'],
+  ['col 是 null', { col: null }, 'col'],
+  ['row 是 true', { row: true }, 'row'],
+  ['span 是小数', { span: 1.5 }, 'span'],
+  ['span 是 NaN', { span: NaN }, 'span'],
+  ['span 是 null', { span: null }, 'span'],
+  ['span 是 true', { span: true }, 'span'],
 ]) {
   test(`报错：${name}`, () => {
     const r = bad((d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 1, row: 1, since: 'first', ...patch }]); });
-    assert.ok(r.errors.length > 0);
+    assert.equal(r.errors.length, 1, r.errors.join('\n'));
+    assert.match(r.errors[0], new RegExp(`nodes\\[0\\]\\.${field}\\b`));
   });
 }
