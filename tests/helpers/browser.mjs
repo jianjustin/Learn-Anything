@@ -1,0 +1,113 @@
+// 页面测试辅助：找到 playwright-core，启动本机 Chrome（退回 playwright 自带的 Chromium），
+// 在临时目录里搭好课程目录，打开页面并收集请求和报错。
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { ASSETS_DIR, fixture } from './paths.mjs';
+import { readDataFile, writeDataFile } from '../../plugins/learn-anything/skills/learn/scripts/lib/data-file.mjs';
+
+const require = createRequire(import.meta.url);
+
+// 查找顺序：本地安装、PLAYWRIGHT_CORE_PATH、npm 全局目录（含 @playwright/mcp 和 @playwright/test 自带的那份）
+function playwrightCandidates() {
+  const list = ['playwright-core'];
+  if (process.env.PLAYWRIGHT_CORE_PATH) list.push(process.env.PLAYWRIGHT_CORE_PATH);
+  try {
+    const root = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (root) {
+      list.push(path.join(root, 'playwright-core'));
+      list.push(path.join(root, '@playwright/mcp/node_modules/playwright-core'));
+      list.push(path.join(root, '@playwright/test/node_modules/playwright-core'));
+      list.push(path.join(root, 'playwright/node_modules/playwright-core'));
+    }
+  } catch {
+    // 没有 npm 时只试前两种
+  }
+  return list;
+}
+
+let playwright;
+function loadPlaywright() {
+  if (playwright !== undefined) return playwright;
+  playwright = null;
+  for (const c of playwrightCandidates()) {
+    try {
+      playwright = require(c);
+      break;
+    } catch {
+      // 试下一个
+    }
+  }
+  return playwright;
+}
+
+// 返回 { browser } 或 { skip: '原因' }；跳过的测试在 run-all.sh 里算失败
+export async function launchBrowser() {
+  const pw = loadPlaywright();
+  if (!pw) return { skip: '找不到 playwright-core（可设置 PLAYWRIGHT_CORE_PATH，或全局安装 @playwright/mcp）' };
+  const errors = [];
+  for (const opts of [{ channel: 'chrome' }, {}]) {
+    try {
+      return { browser: await pw.chromium.launch({ headless: true, ...opts }) };
+    } catch (e) {
+      errors.push(`${opts.channel || 'chromium'}: ${String(e.message).split('\n')[0]}`);
+    }
+  }
+  return { skip: '无法启动 Chrome 或 Chromium：' + errors.join(' | ') };
+}
+
+export const fileUrl = (p) => pathToFileURL(p).href;
+
+// 在临时目录里放好 course.html 和样例数据，返回课程目录。
+// 默认的临时目录名含空格和中文，顺带检验页面对这类路径的处理。
+export function makeCourseDir(fixtureName, { root, slug } = {}) {
+  const base = root || mkdtempSync(path.join(os.tmpdir(), '学习 课程-'));
+  const dir = path.join(base, slug || fixtureName);
+  mkdirSync(dir, { recursive: true });
+  copyFileSync(path.join(ASSETS_DIR, 'course.html'), path.join(dir, 'course.html'));
+  copyFileSync(fixture(fixtureName), path.join(dir, 'course-data.js'));
+  return dir;
+}
+
+// 打开页面，收集 console 报错、未捕获的异常和全部请求地址
+export async function openPage(browser, url, { colorScheme = 'light', viewport = { width: 1280, height: 900 } } = {}) {
+  const context = await browser.newContext({ colorScheme, viewport });
+  const page = await context.newPage();
+  const consoleErrors = [];
+  const requests = [];
+  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('pageerror', (e) => consoleErrors.push(String(e)));
+  page.on('request', (r) => requests.push(r.url()));
+  await page.goto(url);
+  return { page, context, consoleErrors, requests };
+}
+
+// 读出课程数据、改完原子写回；返回改后的对象
+export function rewriteData(file, mutate) {
+  const data = readDataFile(file, 'LEARN_COURSE');
+  mutate(data);
+  writeDataFile(file, 'LEARN_COURSE', data);
+  return data;
+}
+
+// 轮询直到 fn 返回真值（可以是 async）；超时抛出最后一次的结果或异常
+export async function eventually(fn, { timeout = 8000, interval = 100, message = '等待超时' } = {}) {
+  const deadline = Date.now() + timeout;
+  let last;
+  for (;;) {
+    try {
+      const v = await fn();
+      if (v) return v;
+      last = v;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`${message}（${timeout} 毫秒）；最后一次：${last instanceof Error ? last.message : String(last)}`);
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
