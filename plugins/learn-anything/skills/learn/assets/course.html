@@ -1915,13 +1915,16 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     var measureEdge = function (t) { return textWidth(t, '400', EDGE_FONT); };
     s.edges.forEach(function (e) {
       if (!e.label) return;
-      var w = Math.ceil(measureEdge(e.label)) + 2 * EDGE_PAD;
+      // 比画布还宽的标签截断，底框仍落在画布内，悬停看全文
+      var text = ellipsize(e.label, s.width - 2 * EDGE_PAD, measureEdge);
+      var w = Math.min(s.width, Math.ceil(measureEdge(text)) + 2 * EDGE_PAD);
       var box = placeEdgeLabel(e.points, w, EDGE_LABEL_H, placed, s);
       placed.push(box);
       var gEl = svg.appendChild(svgEl('g', {}, 'edge-label' + (e.isNew ? ' is-new' : '')));
       gEl.setAttribute('data-edge-label', e.from + '→' + e.to);
       gEl.appendChild(svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 3 }));
-      gEl.appendChild(svgText({ x: box.x + box.w / 2, y: box.y + box.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', e.label));
+      gEl.appendChild(svgText({ x: box.x + box.w / 2, y: box.y + box.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', text));
+      if (text !== e.label) gEl.appendChild(svgEl('title')).textContent = e.label;
     });
 
     s.nodes.forEach(function (n) {

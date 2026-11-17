@@ -168,7 +168,7 @@ const annotBox = (a) => {
   return { x: a.x, y: a.y, w: a.w, h: a.h };
 };
 
-test('单行跳连：每一课的连线点和标签位置都在画布内，画布高度逐课不变', () => {
+test('单行跳连：每一课的连线点都在画布内，画布高度逐课不变', () => {
   const p = {
     kind: 'diagram', title: 't',
     nodes: [
@@ -186,11 +186,8 @@ test('单行跳连：每一课的连线点和标签位置都在画布内，画�
     const s = at(id, p);
     heights.add(s.height);
     for (const e of s.edges) {
+      // 连线标签的位置由页面计算（见页面测试 G12），核心只负责连线的点
       for (const pt of e.points) assert.ok(pt.x >= 0 && pt.y >= 0 && pt.x <= s.width && pt.y <= s.height, `${id} ${e.from}→${e.to} ${JSON.stringify(pt)} 超出 ${s.width}×${s.height}`);
-      // 页面把标签画在中间那段的中点：水平段往下绕时在线下 16px，否则在线上 6px
-      const k = Math.floor((e.points.length - 2) / 2), m = e.points[k], n = e.points[k + 1];
-      const ly = m.y === n.y ? (m.y > e.points[0].y ? m.y + 16 : m.y - 6) : (m.y + n.y) / 2 + 4;
-      assert.ok(ly >= 0 && ly <= s.height, `${id} ${e.from}→${e.to} 标签 y=${ly} 超出画布高 ${s.height}`);
     }
   }
   assert.equal(heights.size, 1, `画布高度逐课变化：${[...heights]}`);

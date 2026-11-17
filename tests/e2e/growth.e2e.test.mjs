@@ -4,7 +4,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { eventually, fileUrl, launchBrowser, makeCourseDir, openPage } from '../helpers/browser.mjs';
+import { eventually, fileUrl, launchBrowser, makeCourseDir, openPage, rewriteData } from '../helpers/browser.mjs';
 import { loadCore, loadFixture } from '../helpers/load-core.mjs';
 
 const C = loadCore();
@@ -165,8 +165,9 @@ const densePanel = dense.growth.find((g) => g.kind === 'diagram');
 const denseLast = dense.lessons[dense.lessons.length - 1].id;
 const splitNodes = densePanel.nodes.filter((n) => n.label.includes('\n')).map((n) => n.id);
 
-async function openDense(t, browser, opts) {
+async function openDense(t, browser, opts, mutate) {
   const dir = makeCourseDir('dense-diagram');
+  if (mutate) rewriteData(path.join(dir, 'course-data.js'), mutate);
   const opened = await openPage(browser, fileUrl(path.join(dir, 'course.html')), opts);
   t.after(() => opened.context.close());
   await opened.page.locator('#lessons li').first().waitFor({ timeout: 8000 });
@@ -250,4 +251,94 @@ test('G11 密集图：导出的 SVG 里也有分行标签和标注底框', async
   assert.equal(got.labels.length, s.edges.filter((e) => e.label).length);
   for (const f of [...got.annots, ...got.labels]) assert.ok(f && f !== 'none' && !f.startsWith('var('), `底框填充 ${f}`);
   assert.ok(requests.every((u) => u.startsWith('file:') || u.startsWith('blob:')), requests.join('\n'));
+});
+
+// 页面上每个连线标签底框、节点形状、标注底框的矩形（SVG 坐标），以及画布的 viewBox
+const LAYOUT = `(svg) => {
+  const box = (r) => ({ x: +r.getAttribute('x'), y: +r.getAttribute('y'), w: +r.getAttribute('width'), h: +r.getAttribute('height') });
+  const vb = svg.viewBox.baseVal;
+  return {
+    view: { x: vb.x, y: vb.y, w: vb.width, h: vb.height },
+    labels: Array.from(svg.querySelectorAll('.edge-label')).map((g) => ({ id: g.dataset.edgeLabel, ...box(g.querySelector('rect')) })),
+    shapes: Array.from(svg.querySelectorAll('.node rect.shape')).map((r) => ({ id: r.parentNode.dataset.nodeId, ...box(r) })),
+    chips: Array.from(svg.querySelectorAll('.d-annot rect')).map((r) => ({ id: r.parentNode.dataset.annot, ...box(r) })),
+  };
+}`;
+const meets = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const insideView = (r, v) => r.x >= v.x && r.y >= v.y && r.x + r.w <= v.x + v.w && r.y + r.h <= v.y + v.h;
+const layoutOf = (page) => page.locator('[data-panel="diagram"] svg').evaluate((svg, src) => eval(src)(svg), LAYOUT);
+
+test('G12 密集图：每一课的连线标签都在画布内，不压住节点和标注；比画布还宽的标签截断', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page } = await openDense(t, b.browser);
+  for (const l of dense.lessons) {
+    await showLesson(page, l.id);
+    const lay = await layoutOf(page);
+    assert.equal(lay.labels.length, C.diagramAt(densePanel, dense.lessons, l.id).edges.filter((e) => e.label).length, l.id);
+    for (const r of lay.labels) {
+      assert.ok(insideView(r, lay.view), `${l.id} 标签 ${r.id} ${JSON.stringify(r)} 超出 ${JSON.stringify(lay.view)}`);
+      for (const o of [...lay.shapes, ...lay.chips]) assert.equal(meets(r, o), false, `${l.id} 标签 ${r.id} 压住 ${o.id} ${JSON.stringify(o)}`);
+    }
+  }
+
+  const wide = '超长的连线标签'.repeat(30);
+  const { page: p2 } = await openDense(t, b.browser, undefined, (d) => {
+    d.growth[0].edges.find((e) => e.from === 'rider' && e.to === 'gw').label = wide;
+  });
+  const lay = await layoutOf(p2);
+  const r = lay.labels.find((x) => x.id === 'rider→gw');
+  assert.ok(insideView(r, lay.view), `超宽标签 ${JSON.stringify(r)} 超出 ${JSON.stringify(lay.view)}`);
+  const g = p2.locator('[data-panel="diagram"] .edge-label[data-edge-label="rider→gw"]');
+  assert.match(await g.locator('text').textContent(), /…$/);
+  assert.equal(await g.locator('title').textContent(), wide);
+});
+
+test('G13 密集图：节点标签、标注、连线标签的字都在自己的框内', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page } = await openDense(t, b.browser);
+  for (const l of dense.lessons) {
+    await showLesson(page, l.id);
+    const bad = await page.locator('[data-panel="diagram"] svg').evaluate((svg) => {
+      const out = [];
+      // 字的外框（按字体的上下沿算）：左右要离框边至少 inset（节点 4px、小标签 2px，比页面用的内边距略小）；
+      // 上下允许字体行高带来的 1px 出入
+      const check = (kind, id, frame, el, inset) => {
+        const f = frame.getBBox(), t = el.getBBox();
+        if (t.x < f.x + inset - 0.5 || t.x + t.width > f.x + f.width - inset + 0.5 || t.y < f.y - 1 || t.y + t.height > f.y + f.height + 1) {
+          out.push(`${kind} ${id} 「${el.textContent}」 字 ${[t.x, t.y, t.width, t.height].map(Math.round)} 框 ${[f.x, f.y, f.width, f.height].map(Math.round)}`);
+        }
+      };
+      svg.querySelectorAll('.node').forEach((g) => g.querySelectorAll('text tspan').forEach((ts) => check('节点', g.dataset.nodeId, g.querySelector('rect.shape'), ts, 4)));
+      svg.querySelectorAll('.d-annot').forEach((g) => check('标注', g.dataset.annot, g.querySelector('rect'), g.querySelector('text'), 2));
+      svg.querySelectorAll('.edge-label').forEach((g) => check('连线标签', g.dataset.edgeLabel, g.querySelector('rect'), g.querySelector('text'), 2));
+      return out;
+    });
+    assert.deepEqual(bad, [], l.id);
+  }
+});
+
+test('G14 密集图：没有换行符的长标签折成两行，仍放不下才截断，悬停看全文', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page } = await openDense(t, b.browser);
+  const long = densePanel.nodes.find((n) => n.id === 'forecast').label;
+  assert.ok(!long.includes('\n') && long.length > 8);
+  const node = page.locator('[data-panel="diagram"] .node[data-node-id="forecast"]');
+  const lines = await node.locator('text tspan').allTextContents();
+  assert.equal(lines.length, 2, `forecast 应折成两行：${JSON.stringify(lines)}`);
+  assert.equal(lines.join(''), long, '折行不丢字、不截断');
+  assert.equal(await node.locator('title').textContent(), long);
+
+  const huge = '一个长到两行也放不下的节点标签需要截断才行'.repeat(2);
+  const { page: p2 } = await openDense(t, b.browser, undefined, (d) => {
+    d.growth[0].nodes.find((n) => n.id === 'forecast').label = huge;
+  });
+  const n2 = p2.locator('[data-panel="diagram"] .node[data-node-id="forecast"]');
+  const cut = await n2.locator('text tspan').allTextContents();
+  assert.equal(cut.length, 2, JSON.stringify(cut));
+  assert.match(cut[1], /…$/, `第二行应以省略号结尾：${JSON.stringify(cut)}`);
+  assert.ok(huge.startsWith(cut[0]), JSON.stringify(cut));
+  assert.equal(await n2.locator('title').textContent(), huge);
 });
