@@ -235,7 +235,7 @@ li[data-status="skipped"] .l-title { text-decoration: line-through; text-decorat
 .diagram .d-group rect { fill: var(--surface-2); fill-opacity: .55; stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
 .diagram .d-group text { fill: var(--ink-3); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
 .diagram .node rect.shape { stroke-width: 1.25; }
-.diagram .node text { font-size: 14px; font-weight: 550; fill: var(--ink); }
+.diagram .node text { font-size: 13px; font-weight: 550; fill: var(--ink); }
 .diagram .node[data-style="box"] rect.shape { fill: var(--surface-2); stroke: var(--line-strong); }
 .diagram .node[data-style="pill"] rect.shape { fill: var(--accent-soft); stroke: var(--accent); }
 .diagram .node[data-style="pill"] text { fill: var(--accent-ink); }
@@ -249,9 +249,13 @@ li[data-status="skipped"] .l-title { text-decoration: line-through; text-decorat
 .diagram .edge.is-new path { stroke: var(--accent); }
 .diagram .arrow { fill: var(--ink-3); }
 .diagram .arrow-new { fill: var(--accent); }
-.diagram .edge text { font-size: 12px; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
-.diagram .d-annot { font-size: 12px; fill: var(--ink-2); }
-.diagram .d-annot.is-new { fill: var(--accent-ink); }
+/* 连线标签和标注的底框不透明，叠在连线上面；字号与 course-app 里的 EDGE_FONT、CHIP_FONT 一致 */
+.diagram .edge-label rect { fill: var(--surface); }
+.diagram .edge-label text { font-size: 11px; fill: var(--ink-2); }
+.diagram .edge-label.is-new text { fill: var(--accent-ink); }
+.diagram .d-annot rect { fill: var(--warn-soft); stroke: var(--warn-line); stroke-width: 1; }
+.diagram .d-annot text { font-size: 11px; fill: var(--warn-ink); }
+.diagram .d-annot.is-new rect { stroke: var(--accent); }
 .diagram .d-route circle, .diagram .d-route rect { fill: var(--accent); }
 .diagram .d-route text { fill: var(--surface); font-size: 11px; font-weight: 700; }
 .route-num {
@@ -873,9 +877,16 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   var MARGIN = 32;        // 画布四周留白；也给分组的外框和标题留出位置
   var GROUP_PAD = 14;     // 分组外框比成员多出的边
   var GROUP_LABEL = 18;   // 分组外框顶部给标题的高度
-  var ANNOT_GAP = 8;      // 标注与节点底边的间距
-  var ANNOT_LINE = 18;    // 每条标注占的高度
   var MAX_ANNOTATIONS = 3;
+  // 标注小标签：叠在节点上方，第一条离节点最近。3 条叠起来高 64px，行间空隙是 90px，碰不到上一行的节点
+  var CHIP_FONT = 11;     // 标注字号，页面的样式与此一致
+  var CHIP_PAD = 6;       // 字两侧的内边距
+  var CHIP_H = 16;
+  var CHIP_GAP = 2;       // 同一节点的两条标注之间
+  var CHIP_LIFT = 12;     // 最下面一条标注的底边到节点顶边，给从上方进来的箭头留出位置
+  var CHIP_MAX_W = core.GRID.colW - 8; // 不超过一列宽，相邻两列的标注不会叠在一起
+  var BLOCK_PAD = 3;      // 判断连线穿过节点时，节点四周多算的边，免得线贴着节点的角擦过去
+  var PAIR_OFFSET = 5;    // 一对相反方向的连线各自往旁边让开的距离
 
   function list(v) { return Array.isArray(v) ? v : []; }
   function lessonPos(lessons, id) {
@@ -891,43 +902,69 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     return u < 0 || cur < u;
   }
   function isNewAt(o, lessons, cur) { return cur >= 0 && lessonPos(lessons, o.since) === cur; }
+  function round(v) { return Math.round(v * 100) / 100; }
 
-  function nodeRect(n) {
+  // 估算文字宽度：course-core 里量不了字，汉字等宽字符按 1em、其他字符按 0.6em 算（比实际略宽）
+  function textWidth(s, size) {
+    var wide = s.replace(/[\u0000-ÿ]/g, '').length;
+    return wide * size + (s.length - wide) * size * 0.6;
+  }
+  function chipStack(k) { return k ? CHIP_LIFT + k * CHIP_H + (k - 1) * CHIP_GAP : 0; }
+
+  // 第一行节点上方要放得下它的标注：整张图往下挪，挪多少按整个面板（不按当前课）算，节点位置逐课不变。
+  // 挪了时再多留 8px，包住标注的分组外框不会贴着画布顶边
+  function topOffset(panel) {
+    var count = Object.create(null), stack = 0;
+    list(panel.annotations).forEach(function (a) { count[a.node] = (count[a.node] || 0) + 1; });
+    list(panel.nodes).forEach(function (n) {
+      if (n.row === 1) stack = Math.max(stack, chipStack(Math.min(count[n.id] || 0, MAX_ANNOTATIONS)));
+    });
+    return MARGIN + (stack ? stack + 8 : 0);
+  }
+
+  function nodeRect(n, top) {
     var g = core.GRID;
     return {
       x: MARGIN + (n.col - 1) * g.colW,
-      y: MARGIN + (n.row - 1) * g.rowH,
+      y: top + (n.row - 1) * g.rowH,
       w: g.nodeW + g.colW * ((n.span || 1) - 1),
       h: g.nodeH
     };
   }
 
-  // 连线只连接两个节点的边缘：同行走水平线，上下相对走竖线，其余走三折线
-  function edgePoints(a, b) {
-    var vOverlap = a.y < b.y + b.h && b.y < a.y + a.h;
-    var hOverlap = a.x < b.x + b.w && b.x < a.x + a.w;
-    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2;
-    if (vOverlap && hOverlap) return [{ x: acx, y: a.y + a.h / 2 }, { x: bcx, y: b.y + b.h / 2 }];
-    if (vOverlap) {
-      var ay = a.y + a.h / 2, by = b.y + b.h / 2;
-      return a.x < b.x
-        ? [{ x: a.x + a.w, y: ay }, { x: b.x, y: by }]
-        : [{ x: a.x, y: ay }, { x: b.x + b.w, y: by }];
-    }
-    var down = a.y < b.y;
-    var y1 = down ? a.y + a.h : a.y;
-    var y2 = down ? b.y : b.y + b.h;
-    if (hOverlap) {
-      var x = (Math.max(a.x, b.x) + Math.min(a.x + a.w, b.x + b.w)) / 2;
-      return [{ x: x, y: y1 }, { x: x, y: y2 }];
-    }
-    var ym = (y1 + y2) / 2;
-    return [{ x: acx, y: y1 }, { x: acx, y: ym }, { x: bcx, y: ym }, { x: bcx, y: y2 }];
+  // 从矩形内的点 p 沿 (dx, dy) 方向走到矩形边上
+  function exitPoint(p, dx, dy, r) {
+    var t = Infinity;
+    if (dx) t = Math.min(t, ((dx > 0 ? r.x + r.w : r.x) - p.x) / dx);
+    if (dy) t = Math.min(t, ((dy > 0 ? r.y + r.h : r.y) - p.y) / dy);
+    if (!isFinite(t)) t = 0;
+    return { x: round(p.x + dx * t), y: round(p.y + dy * t) };
   }
 
+  // 连线默认是一条直线：从两个节点的中心连过去，两端截到节点的边上；offset 是沿法线的平移
+  function straightPoints(a, b, offset) {
+    var ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    var dx = cb.x - ca.x, dy = cb.y - ca.y, len = Math.sqrt(dx * dx + dy * dy);
+    if (!len || (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h)) {
+      return [{ x: round(ca.x), y: round(ca.y) }, { x: round(cb.x), y: round(cb.y) }];
+    }
+    var ox = -dy / len * offset, oy = dx / len * offset;
+    var pa = { x: ca.x + ox, y: ca.y + oy }, pb = { x: cb.x + ox, y: cb.y + oy };
+    return [exitPoint(pa, dx, dy, a), exitPoint(pb, -dx, -dy, b)];
+  }
+
+  // 线段是否穿过矩形内部（只碰到边不算），斜线按真实的几何算
   function segmentHits(p, q, r) {
-    var x1 = Math.min(p.x, q.x), x2 = Math.max(p.x, q.x), y1 = Math.min(p.y, q.y), y2 = Math.max(p.y, q.y);
-    return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
+    var dx = q.x - p.x, dy = q.y - p.y, t0 = 0, t1 = 1;
+    var sides = [[-dx, p.x - r.x], [dx, r.x + r.w - p.x], [-dy, p.y - r.y], [dy, r.y + r.h - p.y]];
+    for (var i = 0; i < 4; i++) {
+      var pp = sides[i][0], qq = sides[i][1];
+      if (pp === 0) { if (qq <= 0) return false; continue; }
+      var t = qq / pp;
+      if (pp < 0) { if (t > t1) return false; if (t > t0) t0 = t; }
+      else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+    return t0 < t1;
   }
   function pathHits(points, blockers) {
     for (var i = 1; i < points.length; i++) {
@@ -935,79 +972,123 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     }
     return false;
   }
+  function padded(r) { return { x: r.x - BLOCK_PAD, y: r.y - BLOCK_PAD, w: r.w + 2 * BLOCK_PAD, h: r.h + 2 * BLOCK_PAD }; }
 
-  // 绕行线在行间空隙里走的位置，按离节点边的距离：先走空隙正中，被标注挡住时走到 3 条标注的下方
-  var LANES_BELOW = [45, 70];
-  var LANES_ABOVE = [45, 20];
-  var LABEL_BELOW = 20;   // 往下绕的线，页面把标签画在线下 16px，再留一点给字的下沿
+  // 绕行线在行间空隙里走的位置，按离节点边的距离：先走空隙正中，被标注挡住时贴着节点走、或走到标注外侧
+  var LANES_BELOW = [45, 70, 18];
+  var LANES_ABOVE = [45, 20, 76];
+  var LABEL_BELOW = 20;   // 往下绕的线在最深一条线下方再留出一个连线标签的高度
   var SIDE_GAP = 24;      // 列间空隙的一半
-
-  // 标注文字所占的框：12px 字，汉字按 12px、其他字符按 7px 估宽，高一行
-  function annotationRect(a) {
-    var wide = a.text.replace(/[\u0000-ÿ]/g, '').length;
-    return { x: a.x, y: a.y, w: wide * 12 + (a.text.length - wide) * 7, h: ANNOT_LINE };
-  }
 
   // 同一行、中间至少隔着一列的两个节点之间的连线可能要绕行
   function mayDetour(a, b) {
     return a.y === b.y && Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w) > core.GRID.colW - core.GRID.nodeW;
   }
 
-  // 直线穿过了别的节点时换一条，候选依次是：
-  //   同行：从上方空隙绕（第一行上方没有空隙，不走）→ 从两端底边往下绕 → 从相对的两侧出来、经列间空隙往下绕；
-  //   同列：经右侧列间空隙绕 → 经左侧列间空隙绕。
-  // 只有直线穿过别的节点才绕行（只压到标注不绕，免得为一行小字把线拉远）；
-  // 每条候选都不能穿过别的节点和当前可见的标注；都不行时保留直线
-  function routeEdge(a, b, nodeBlockers, annotationRects) {
-    var pts = edgePoints(a, b);
-    if (pts.length !== 2 || !pathHits(pts, nodeBlockers)) return pts;
-    var blockers = nodeBlockers.concat(annotationRects);
-    var g = core.GRID, candidates = [];
-    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2;
-    if (pts[0].y === pts[1].y) {
-      if (a.y - MARGIN >= (g.rowH - g.nodeH) / 2) {
-        LANES_ABOVE.forEach(function (d) {
-          var y = a.y - d;
-          candidates.push([{ x: acx, y: a.y }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: b.y }]);
-        });
-      }
-      var bottom = a.y + a.h, dir = a.x < b.x ? 1 : -1;
-      var aSide = dir > 0 ? a.x + a.w : a.x, bSide = dir > 0 ? b.x : b.x + b.w;
-      var ay = a.y + a.h / 2, by = b.y + b.h / 2;
+  // 直线穿过别的节点时的候选折线，全部是横竖线段，落在画布内：
+  //   同行：从上方空隙绕（离画布顶不足 MARGIN 的不走）→ 从两端底边往下绕 → 从相对的两侧出来、经列间空隙往下绕；
+  //   同列：经右侧列间空隙绕 → 经左侧列间空隙绕；
+  //   斜向：先竖后横、先横后竖的 L 形 → 经两者之间的行间空隙 → 经两者之间的列间空隙。
+  function detourCandidates(a, b) {
+    var g = core.GRID, out = [];
+    var acx = a.x + a.w / 2, bcx = b.x + b.w / 2, ay = a.y + a.h / 2, by = b.y + b.h / 2;
+    var vOverlap = a.y < b.y + b.h && b.y < a.y + a.h;
+    var hOverlap = a.x < b.x + b.w && b.x < a.x + a.w;
+    var dir = a.x < b.x ? 1 : -1;
+    var aSide = dir > 0 ? a.x + a.w : a.x, bSide = dir > 0 ? b.x : b.x + b.w;
+    if (vOverlap) {
+      LANES_ABOVE.forEach(function (d) {
+        var y = a.y - d;
+        if (y >= MARGIN) out.push([{ x: acx, y: a.y }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: b.y }]);
+      });
+      var bottom = a.y + a.h;
       LANES_BELOW.forEach(function (d) {
         var y = bottom + d;
-        candidates.push([{ x: acx, y: bottom }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: bottom }]);
+        out.push([{ x: acx, y: bottom }, { x: acx, y: y }, { x: bcx, y: y }, { x: bcx, y: bottom }]);
       });
       LANES_BELOW.forEach(function (d) {
         var y = bottom + d, x1 = aSide + dir * SIDE_GAP, x2 = bSide - dir * SIDE_GAP;
-        candidates.push([{ x: aSide, y: ay }, { x: x1, y: ay }, { x: x1, y: y }, { x: x2, y: y }, { x: x2, y: by }, { x: bSide, y: by }]);
+        out.push([{ x: aSide, y: ay }, { x: x1, y: ay }, { x: x1, y: y }, { x: x2, y: y }, { x: x2, y: by }, { x: bSide, y: by }]);
+      });
+    } else if (hOverlap) {
+      // 先从侧边正中出入；正中已有别的线时，上下错开 10px
+      var gr = Math.max(a.x + a.w, b.x + b.w) + SIDE_GAP, gl = Math.min(a.x, b.x) - SIDE_GAP;
+      [0, -10, 10].forEach(function (d) {
+        out.push([{ x: a.x + a.w, y: ay + d }, { x: gr, y: ay + d }, { x: gr, y: by + d }, { x: b.x + b.w, y: by + d }]);
+        out.push([{ x: a.x, y: ay + d }, { x: gl, y: ay + d }, { x: gl, y: by + d }, { x: b.x, y: by + d }]);
       });
     } else {
-      var aY = a.y + a.h / 2, bY = b.y + b.h / 2;
-      var gr = Math.max(a.x + a.w, b.x + b.w) + SIDE_GAP, gl = Math.min(a.x, b.x) - SIDE_GAP;
-      candidates.push([{ x: a.x + a.w, y: aY }, { x: gr, y: aY }, { x: gr, y: bY }, { x: b.x + b.w, y: bY }]);
-      candidates.push([{ x: a.x, y: aY }, { x: gl, y: aY }, { x: gl, y: bY }, { x: b.x, y: bY }]);
+      var down = a.y < b.y;
+      var aEdge = down ? a.y + a.h : a.y, bEdge = down ? b.y : b.y + b.h;
+      out.push([{ x: acx, y: aEdge }, { x: acx, y: by }, { x: bSide, y: by }]);
+      out.push([{ x: aSide, y: ay }, { x: bcx, y: ay }, { x: bcx, y: bEdge }]);
+      // 行间空隙：从上面那个节点的底边往下，每隔一行一个
+      for (var gy = Math.min(a.y, b.y) + g.nodeH; gy < Math.max(a.y, b.y); gy += g.rowH) {
+        [45, 18].forEach(function (d) {
+          out.push([{ x: acx, y: aEdge }, { x: acx, y: gy + d }, { x: bcx, y: gy + d }, { x: bcx, y: bEdge }]);
+        });
+      }
+      // 列间空隙：从靠左那个节点的右边往右，每隔一列一个
+      var left = dir > 0 ? a : b, rightX = dir > 0 ? b.x : a.x;
+      for (var gx = left.x + left.w + SIDE_GAP; gx < rightX; gx += g.colW) {
+        out.push([{ x: aSide, y: ay }, { x: gx, y: ay }, { x: gx, y: by }, { x: bSide, y: by }]);
+      }
     }
-    for (var i = 0; i < candidates.length; i++) if (!pathHits(candidates[i], blockers)) return candidates[i];
-    return pts;
+    return out;
+  }
+
+  // 两条折线有没有沿同一条线走（横段 y 相同或竖段 x 相同，且重合超过 8px）
+  function sharesLane(points, taken) {
+    for (var i = 1; i < points.length; i++) {
+      var p = points[i - 1], q = points[i];
+      for (var k = 0; k < taken.length; k++) {
+        var s = taken[k][0], t = taken[k][1];
+        if (p.y === q.y && s.y === t.y && Math.abs(p.y - s.y) < 4 &&
+          Math.min(Math.max(p.x, q.x), Math.max(s.x, t.x)) - Math.max(Math.min(p.x, q.x), Math.min(s.x, t.x)) > 8) return true;
+        if (p.x === q.x && s.x === t.x && Math.abs(p.x - s.x) < 4 &&
+          Math.min(Math.max(p.y, q.y), Math.max(s.y, t.y)) - Math.max(Math.min(p.y, q.y), Math.min(s.y, t.y)) > 8) return true;
+      }
+    }
+    return false;
+  }
+
+  // 直线穿过别的节点时换成一条绕行线（只压到标注不绕，标注是不透明的小标签，叠在线上面）。
+  // 候选依次要求：不穿过节点和标注、也不和已有的横竖线重合 → 不穿过节点和标注 → 不穿过节点；都不行时保留直线。
+  // taken 是已经定下来的横竖线段，选中的绕行线也加进去
+  function detour(a, b, straight, solid, chipRects, taken) {
+    var candidates = detourCandidates(a, b), all = solid.concat(chipRects);
+    var tests = [
+      function (c) { return !pathHits(c, all) && !sharesLane(c, taken); },
+      function (c) { return !pathHits(c, all); },
+      function (c) { return !pathHits(c, solid); }
+    ];
+    for (var k = 0; k < tests.length; k++) {
+      for (var i = 0; i < candidates.length; i++) {
+        if (tests[k](candidates[i])) {
+          var c = candidates[i];
+          for (var j = 1; j < c.length; j++) taken.push([c[j - 1], c[j]]);
+          return c;
+        }
+      }
+    }
+    return straight;
   }
 
   // 画布大小按面板里所有节点、标注和连线算，不随课程变化，逐课播放时图不会缩放跳动。
-  // 可能往下绕行的连线，在它那一行下方留出最深一条绕行线和它的标签
-  function canvasSize(panel) {
-    var right = 0, bottom = 0, annots = Object.create(null), rects = Object.create(null);
-    list(panel.annotations).forEach(function (a) { annots[a.node] = (annots[a.node] || 0) + 1; });
+  // 顶部留出第一行节点的标注；可能往下绕行的连线，在它那一行下方留出最深一条绕行线和它的标签
+  function canvasSize(panel, top) {
+    var right = 0, bottom = 0, rects = Object.create(null);
     list(panel.nodes).forEach(function (n) {
-      var r = nodeRect(n);
+      var r = nodeRect(n, top);
       rects[n.id] = r;
-      var below = annots[n.id] ? ANNOT_GAP + annots[n.id] * ANNOT_LINE : 0;
       right = Math.max(right, r.x + r.w);
-      bottom = Math.max(bottom, r.y + r.h + below);
+      bottom = Math.max(bottom, r.y + r.h);
     });
     var height = bottom + MARGIN;
+    var deepest = Math.max.apply(null, LANES_BELOW);
     list(panel.edges).forEach(function (e) {
       var a = rects[e.from], b = rects[e.to];
-      if (a && b && mayDetour(a, b)) height = Math.max(height, a.y + a.h + LANES_BELOW[LANES_BELOW.length - 1] + LABEL_BELOW);
+      if (a && b && mayDetour(a, b)) height = Math.max(height, a.y + a.h + deepest + LABEL_BELOW);
     });
     return { width: right + MARGIN, height: height };
   }
@@ -1055,39 +1136,63 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     return steps.length ? { steps: steps } : null;
   }
 
+  // 标签按 \n 分行，最多两行：多出来的行并进第二行
+  function labelLines(label) {
+    var parts = label.split('\n');
+    return parts.length <= 2 ? parts : [parts[0], parts.slice(1).join(' ')];
+  }
+
   // 返回某一课时的图：只含当时可见的元素，坐标是画布像素
   core.diagramAt = function diagramAt(panel, lessons, lessonId) {
     var cur = lessonPos(lessons, lessonId);
     var seen = function (o) { return visibleAt(o, lessons, cur); };
     var fresh = function (o) { return isNewAt(o, lessons, cur); };
+    var top = topOffset(panel);
+    var size = canvasSize(panel, top);
 
     var visible = list(panel.nodes).filter(seen);
     var rects = Object.create(null);
     var nodes = visible.map(function (n) {
-      var r = nodeRect(n);
+      var r = nodeRect(n, top);
       rects[n.id] = r;
-      return { id: n.id, label: n.label, style: n.style || 'box', x: r.x, y: r.y, w: r.w, h: r.h, isNew: fresh(n) };
+      return { id: n.id, label: n.label, lines: labelLines(n.label), style: n.style || 'box', x: r.x, y: r.y, w: r.w, h: r.h, isNew: fresh(n) };
     });
 
-    // 标注排在节点正下方，y 是该条文字的顶边；同一节点的几条依次往下排
+    // 标注是节点上方的小标签，x、y、w、h 是外框；同一节点最多画前 3 条，第一条离节点最近
     var visibleAnnotations = list(panel.annotations).filter(function (a) { return seen(a) && rects[a.node]; });
-    var stacked = Object.create(null);
-    var annotations = visibleAnnotations.map(function (a) {
+    var stacked = Object.create(null), annotations = [];
+    visibleAnnotations.forEach(function (a) {
       var r = rects[a.node], k = stacked[a.node] || 0;
+      if (k >= MAX_ANNOTATIONS) return;
       stacked[a.node] = k + 1;
-      return { node: a.node, text: a.text, x: r.x, y: r.y + r.h + ANNOT_GAP + k * ANNOT_LINE, isNew: fresh(a) };
+      var w = round(Math.min(textWidth(a.text, CHIP_FONT) + 2 * CHIP_PAD, CHIP_MAX_W));
+      var x = Math.max(0, Math.min(size.width - w, round(r.x + r.w / 2 - w / 2)));
+      var y = r.y - CHIP_LIFT - CHIP_H - k * (CHIP_H + CHIP_GAP);
+      annotations.push({ node: a.node, text: a.text, x: x, y: y, w: w, h: CHIP_H, isNew: fresh(a) });
     });
 
-    // 绕行线要避开当前可见的标注文字
-    var annotationRects = annotations.map(annotationRect);
-    var edges = list(panel.edges).filter(function (e) { return seen(e) && rects[e.from] && rects[e.to]; }).map(function (e) {
-      var blockers = nodes.filter(function (n) { return n.id !== e.from && n.id !== e.to; });
+    var visibleEdges = list(panel.edges).filter(function (e) { return seen(e) && rects[e.from] && rects[e.to]; });
+    var pairs = Object.create(null);
+    visibleEdges.forEach(function (e) { pairs[e.from + '\n' + e.to] = true; });
+    // 先定下所有不用绕的直线，其中横线和竖线占住的位置，绕行线不再沿着走
+    var taken = [];
+    var routes = visibleEdges.map(function (e) {
+      var a = rects[e.from], b = rects[e.to];
+      var offset = pairs[e.to + '\n' + e.from] && e.from !== e.to ? PAIR_OFFSET : 0;
+      var solid = nodes.filter(function (n) { return n.id !== e.from && n.id !== e.to; }).map(padded);
+      var straight = straightPoints(a, b, offset), blocked = pathHits(straight, solid);
+      if (!blocked && (straight[0].x === straight[1].x || straight[0].y === straight[1].y)) taken.push(straight);
+      return { a: a, b: b, straight: straight, solid: solid, blocked: blocked };
+    });
+    var edges = visibleEdges.map(function (e, i) {
+      var r = routes[i];
       return {
         from: e.from, to: e.to, label: e.label || '', style: e.style || 'solid',
-        points: routeEdge(rects[e.from], rects[e.to], blockers, annotationRects), isNew: fresh(e)
+        points: r.blocked ? detour(r.a, r.b, r.straight, r.solid, annotations, taken) : r.straight, isNew: fresh(e)
       };
     });
 
+    // 分组外框包住可见成员和它们头上的标注
     var groups = [];
     list(panel.groups).filter(seen).forEach(function (g) {
       var members = list(g.members).filter(function (id) { return rects[id]; });
@@ -1095,19 +1200,18 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       var x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
       members.forEach(function (id) {
         var r = rects[id];
-        x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y);
+        x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y - chipStack(stacked[id] || 0));
         x2 = Math.max(x2, r.x + r.w); y2 = Math.max(y2, r.y + r.h);
       });
+      var gy = Math.max(0, y1 - GROUP_PAD - GROUP_LABEL);
       groups.push({
         id: g.id, label: g.label,
-        x: x1 - GROUP_PAD, y: y1 - GROUP_PAD - GROUP_LABEL,
-        w: x2 - x1 + 2 * GROUP_PAD, h: y2 - y1 + 2 * GROUP_PAD + GROUP_LABEL,
+        x: x1 - GROUP_PAD, y: gy,
+        w: x2 - x1 + 2 * GROUP_PAD, h: y2 + GROUP_PAD - gy,
         isNew: fresh(g)
       });
     });
 
-
-    var size = canvasSize(panel);
     return {
       nodes: nodes, edges: edges, groups: groups, annotations: annotations,
       route: routeAt(panel, lessons, cur, rects),
@@ -1706,11 +1810,72 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     t.textContent = text;
     return t;
   }
-  // 标签太长时缩小字号：汉字按 1em、其他字符按 0.6em 估宽
-  function labelFontSize(label, w) {
-    var wide = label.replace(/[\u0000-ÿ]/g, '').length;
-    var em = wide + (label.length - wide) * 0.6;
-    return Math.max(10, Math.min(14, (w - 16) / Math.max(em, 1)));
+  // 字号固定，这几个值与下面「图」的样式一致；量字用 canvas，量不了时按汉字 1em、其他 0.6em 估
+  var NODE_FONT = 13, NODE_LINE_EM = 1.2, NODE_PAD = 6;
+  var EDGE_FONT = 11, EDGE_PAD = 4, EDGE_LABEL_H = 16;
+  var CHIP_FONT = 11, CHIP_PAD = 6;
+  var measureCtx = null;
+  function textWidth(text, font, size) {
+    if (measureCtx === null) {
+      try { measureCtx = document.createElement('canvas').getContext('2d') || false; } catch (e) { measureCtx = false; }
+    }
+    if (measureCtx) {
+      measureCtx.font = font + ' ' + size + 'px ' + (getComputedStyle(document.documentElement).getPropertyValue('--sans') || 'sans-serif');
+      return measureCtx.measureText(text).width;
+    }
+    var wide = text.replace(/[\u0000-ÿ]/g, '').length;
+    return (wide + (text.length - wide) * 0.6) * size;
+  }
+  // 截到 maxW 以内，末尾加省略号
+  function ellipsize(text, maxW, measure) {
+    if (measure(text) <= maxW) return text;
+    var chars = Array.from(text);
+    while (chars.length && measure(chars.join('') + '…') > maxW) chars.pop();
+    return chars.join('').trim() + '…';
+  }
+  // 节点标签：按核心给的行显示；只有一行且放不下时在节点宽度内折成两行（尽量在空格或标点后折），仍放不下才截断
+  function fitLabel(lines, maxW, measure) {
+    if (lines.length === 1 && measure(lines[0]) > maxW) {
+      var chars = Array.from(lines[0]), cut = 1;
+      while (cut < chars.length && measure(chars.slice(0, cut + 1).join('')) <= maxW) cut++;
+      for (var i = cut; i > cut / 2; i--) {
+        if (/[\s)）\]】,，、/·:：-]/.test(chars[i - 1]) || /[\s(（\[【]/.test(chars[i] || '')) { cut = i; break; }
+      }
+      lines = [chars.slice(0, cut).join('').trim(), chars.slice(cut).join('').trim()];
+    }
+    return lines.map(function (l) { return ellipsize(l, maxW, measure); });
+  }
+  function overlapArea(a, b) {
+    var w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 ? w * h : 0;
+  }
+  // 连线标签放在线的中点附近：依次试中点和两侧的几个位置，横线放在线上方或下方，竖线放在右侧或左侧，斜线压在线上；
+  // 选和节点、标注、已放好的标签重叠最少的一个（都不重叠时取最先试的），并限制在画布内
+  function placeEdgeLabel(points, w, h, obstacles, s) {
+    var lens = [], total = 0;
+    for (var i = 1; i < points.length; i++) {
+      var d = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+      lens.push(d);
+      total += d;
+    }
+    var best = null, bestScore = Infinity;
+    [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8].forEach(function (f) {
+      var left = total * f, k = 0;
+      while (k < lens.length - 1 && left > lens[k]) { left -= lens[k]; k++; }
+      var p = points[k], q = points[k + 1], t = lens[k] ? left / lens[k] : 0;
+      var x = p.x + (q.x - p.x) * t, y = p.y + (q.y - p.y) * t;
+      var boxes;
+      if (p.y === q.y) boxes = [[x - w / 2, y - h - 2], [x - w / 2, y + 2], [x - w / 2, y - h / 2]];
+      else if (p.x === q.x) boxes = [[x + 4, y - h / 2], [x - 4 - w, y - h / 2], [x - w / 2, y - h / 2]];
+      else boxes = [[x - w / 2, y - h / 2]];
+      boxes.forEach(function (b) {
+        var box = { x: Math.max(0, Math.min(s.width - w, b[0])), y: Math.max(0, Math.min(s.height - h, b[1])), w: w, h: h };
+        var score = 0;
+        obstacles.forEach(function (o) { score += overlapArea(box, o); });
+        if (score < bestScore) { best = box; bestScore = score; }
+      });
+    });
+    return best;
   }
   function pathData(points) {
     return points.map(function (p, i) { return (i ? 'L' : 'M') + p.x + ' ' + p.y; }).join(' ');
@@ -1736,24 +1901,27 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       gEl.appendChild(svgText({ x: g.x + 10, y: g.y + 15 }, '', g.label));
     });
 
-    // 先画所有连线，再画连线标签，标签不会被别的线压住
-    var labels = [];
+    // 叠放顺序从下到上：分组框、连线、连线标签、节点、标注；路线编号是页面上另叠的一层
     s.edges.forEach(function (e) {
       var gEl = svg.appendChild(svgEl('g', {}, 'edge' + (e.isNew ? ' is-new' : '')));
       gEl.setAttribute('data-style', e.style);
       gEl.setAttribute('data-from', e.from);
       gEl.setAttribute('data-to', e.to);
       gEl.appendChild(svgEl('path', { d: pathData(e.points), 'marker-end': 'url(#' + uid + '-arrow' + (e.isNew ? '-new' : '') + ')' }));
-      if (e.label) labels.push({ edge: e, g: gEl });
     });
-    labels.forEach(function (x) {
-      var pts = x.edge.points, k = Math.floor((pts.length - 2) / 2);
-      var a = pts[k], b = pts[k + 1];
-      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      // 水平段的标签放在线上方；从起点往下绕的线放在下方，离开节点和标注
-      var below = a.y === b.y && a.y > pts[0].y;
-      var attrs = a.y === b.y ? { x: mx, y: below ? my + 16 : my - 6, 'text-anchor': 'middle' } : { x: mx + 6, y: my + 4, 'text-anchor': 'start' };
-      x.g.appendChild(svgText(attrs, '', x.edge.label));
+
+    // 连线标签带不透明的底框，避开节点、标注和别的标签
+    var placed = s.nodes.concat(s.annotations);
+    var measureEdge = function (t) { return textWidth(t, '400', EDGE_FONT); };
+    s.edges.forEach(function (e) {
+      if (!e.label) return;
+      var w = Math.ceil(measureEdge(e.label)) + 2 * EDGE_PAD;
+      var box = placeEdgeLabel(e.points, w, EDGE_LABEL_H, placed, s);
+      placed.push(box);
+      var gEl = svg.appendChild(svgEl('g', {}, 'edge-label' + (e.isNew ? ' is-new' : '')));
+      gEl.setAttribute('data-edge-label', e.from + '→' + e.to);
+      gEl.appendChild(svgEl('rect', { x: box.x, y: box.y, width: box.w, height: box.h, rx: 3 }));
+      gEl.appendChild(svgText({ x: box.x + box.w / 2, y: box.y + box.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', e.label));
     });
 
     s.nodes.forEach(function (n) {
@@ -1763,14 +1931,27 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       var rx = n.style === 'pill' ? n.h / 2 : n.style === 'outline' ? 2 : 7;
       if (n.isNew) gEl.appendChild(svgEl('rect', { x: n.x - 3, y: n.y - 3, width: n.w + 6, height: n.h + 6, rx: rx + 3 }, 'halo'));
       gEl.appendChild(svgEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: rx }, 'shape'));
-      var t = svgText({ x: n.x + n.w / 2, y: n.y + n.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', n.label);
-      t.style.fontSize = labelFontSize(n.label, n.w).toFixed(1) + 'px';
-      gEl.appendChild(t);
+      var weight = n.style === 'ghost' ? 'italic 400' : '550';
+      var lines = fitLabel(n.lines, n.w - 2 * NODE_PAD, function (t) { return textWidth(t, weight, NODE_FONT); });
+      var cx = n.x + n.w / 2;
+      var t = gEl.appendChild(svgEl('text', { x: cx, y: n.y + n.h / 2, 'text-anchor': 'middle' }));
+      lines.forEach(function (line, i) {
+        // 一行时垂直居中；两行时以中线为界上下各一行
+        var dy = lines.length === 1 ? 0.35 : i === 0 ? 0.35 - NODE_LINE_EM / 2 : NODE_LINE_EM;
+        t.appendChild(svgEl('tspan', { x: cx, dy: dy + 'em' })).textContent = line;
+      });
       gEl.appendChild(svgEl('title')).textContent = n.label;
     });
 
+    // 标注：叠在节点上方的小标签，底框不透明；字放不下时截断，悬停看全文
+    var measureChip = function (t) { return textWidth(t, '400', CHIP_FONT); };
     s.annotations.forEach(function (a) {
-      svg.appendChild(svgText({ x: a.x, y: a.y + 12 }, 'd-annot' + (a.isNew ? ' is-new' : ''), a.text));
+      var gEl = svg.appendChild(svgEl('g', {}, 'd-annot' + (a.isNew ? ' is-new' : '')));
+      gEl.setAttribute('data-annot', a.node);
+      gEl.appendChild(svgEl('rect', { x: a.x, y: a.y, width: a.w, height: a.h, rx: a.h / 2 }));
+      var text = ellipsize(a.text, a.w - 2 * CHIP_PAD + 2, measureChip);
+      gEl.appendChild(svgText({ x: a.x + a.w / 2, y: a.y + a.h / 2, dy: '0.35em', 'text-anchor': 'middle' }, '', text));
+      if (text !== a.text) gEl.appendChild(svgEl('title')).textContent = a.text;
     });
     return svg;
   }

@@ -158,3 +158,96 @@ test('G8 窄屏和深色：图不撑出页面', async (t) => {
     assert.equal(fits, true);
   }
 });
+
+// ---- 密集图 ----
+const dense = loadFixture('dense-diagram');
+const densePanel = dense.growth.find((g) => g.kind === 'diagram');
+const denseLast = dense.lessons[dense.lessons.length - 1].id;
+const splitNodes = densePanel.nodes.filter((n) => n.label.includes('\n')).map((n) => n.id);
+
+async function openDense(t, browser, opts) {
+  const dir = makeCourseDir('dense-diagram');
+  const opened = await openPage(browser, fileUrl(path.join(dir, 'course.html')), opts);
+  t.after(() => opened.context.close());
+  await opened.page.locator('#lessons li').first().waitFor({ timeout: 8000 });
+  await showLesson(opened.page, denseLast);
+  return opened;
+}
+
+// 底框是否不透明：有填充色、颜色本身不透明、fill-opacity 和 opacity 都是 1
+const OPAQUE_FILL = `(rect) => {
+  if (!rect) return false;
+  const cs = getComputedStyle(rect);
+  const m = cs.fill.match(/^rgba?\\(([^)]+)\\)$/);
+  if (!m) return false;
+  const parts = m[1].split(/[ ,\\/]+/).filter(Boolean);
+  const alpha = parts.length > 3 ? parseFloat(parts[3]) : 1;
+  return alpha === 1 && parseFloat(cs.fillOpacity) === 1 && parseFloat(cs.opacity) === 1;
+}`;
+
+test('G9 密集图：标签分两行显示，字号不小于 11px', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, consoleErrors } = await openDense(t, b.browser);
+  assert.ok(splitNodes.length >= 4);
+  for (const id of splitNodes) {
+    const lines = page.locator(`[data-panel="diagram"] .node[data-node-id="${id}"] text tspan`);
+    assert.equal(await lines.count(), 2, `${id} 应分两行`);
+    const expected = densePanel.nodes.find((n) => n.id === id).label.split('\n');
+    assert.deepEqual(await lines.allTextContents(), expected, id);
+  }
+  const sizes = await page.locator('[data-panel="diagram"] .node text').evaluateAll((els) => els.map((e) => parseFloat(getComputedStyle(e).fontSize)));
+  assert.equal(sizes.length, C.diagramAt(densePanel, dense.lessons, denseLast).nodes.length);
+  for (const px of sizes) assert.ok(px >= 11, `节点字号 ${px}px`);
+  assert.deepEqual(consoleErrors, []);
+});
+
+test('G10 密集图：标注和连线标签有不透明的底色，叠在连线之上', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page } = await openDense(t, b.browser);
+  const s = C.diagramAt(densePanel, dense.lessons, denseLast);
+  const annots = page.locator('[data-panel="diagram"] .d-annot');
+  const labels = page.locator('[data-panel="diagram"] .edge-label');
+  assert.equal(await annots.count(), s.annotations.length);
+  assert.equal(await labels.count(), s.edges.filter((e) => e.label).length);
+  for (const loc of [annots, labels]) {
+    const ok = await loc.evaluateAll((els, src) => {
+      const opaque = eval(src);
+      return els.map((g) => opaque(g.querySelector('rect')) && g.querySelector('text') !== null);
+    }, OPAQUE_FILL);
+    assert.ok(ok.length > 0 && ok.every(Boolean), JSON.stringify(ok));
+  }
+  const order = await page.locator('[data-panel="diagram"] svg').evaluate((svg) => {
+    const all = Array.from(svg.querySelectorAll('.edge, .edge-label, .node, .d-annot'));
+    const last = (cls) => Math.max(...all.map((e, i) => (e.matches(cls) ? i : -1)));
+    const first = (cls) => all.findIndex((e) => e.matches(cls));
+    return { lastEdge: last('.edge'), firstLabel: first('.edge-label'), lastLabel: last('.edge-label'), firstNode: first('.node'), lastNode: last('.node'), firstAnnot: first('.d-annot') };
+  });
+  assert.ok(order.lastEdge < order.firstLabel, JSON.stringify(order));
+  assert.ok(order.lastLabel < order.firstNode, JSON.stringify(order));
+  assert.ok(order.lastNode < order.firstAnnot, JSON.stringify(order));
+});
+
+test('G11 密集图：导出的 SVG 里也有分行标签和标注底框', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page, requests } = await openDense(t, b.browser);
+  const s = C.diagramAt(densePanel, dense.lessons, denseLast);
+  const [svg] = await Promise.all([page.waitForEvent('download'), page.locator('[data-export="svg"]').click()]);
+  const text = readFileSync(await svg.path(), 'utf8');
+  const got = await page.evaluate((src) => {
+    const doc = new DOMParser().parseFromString(src, 'image/svg+xml');
+    const fillOf = (r) => r && r.getAttribute('fill');
+    return {
+      split: Array.from(doc.querySelectorAll('[data-node-id]')).filter((g) => g.querySelectorAll('tspan').length === 2).map((g) => g.getAttribute('data-node-id')),
+      annots: Array.from(doc.querySelectorAll('[data-annot]')).map((g) => fillOf(g.querySelector('rect'))),
+      labels: Array.from(doc.querySelectorAll('[data-edge-label]')).map((g) => fillOf(g.querySelector('rect'))),
+    };
+  }, text);
+  for (const id of splitNodes) assert.ok(got.split.includes(id), `导出里 ${id} 没有分两行`);
+  assert.equal(got.annots.length, s.annotations.length);
+  assert.equal(got.labels.length, s.edges.filter((e) => e.label).length);
+  for (const f of [...got.annots, ...got.labels]) assert.ok(f && f !== 'none' && !f.startsWith('var('), `底框填充 ${f}`);
+  assert.ok(requests.every((u) => u.startsWith('file:') || u.startsWith('blob:')), requests.join('\n'));
+});

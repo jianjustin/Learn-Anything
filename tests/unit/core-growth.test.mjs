@@ -162,10 +162,10 @@ const segHitsBox = (o, q, r) => {
   const x1 = Math.min(o.x, q.x), x2 = Math.max(o.x, q.x), y1 = Math.min(o.y, q.y), y2 = Math.max(o.y, q.y);
   return x1 < r.x + r.w && x2 > r.x && y1 < r.y + r.h && y2 > r.y;
 };
-// 标注文字的框：12px 字，汉字按 12px、其他字符按 7px 估宽，高一行（18px）
+// 标注是节点上方的小标签，diagramAt 直接给出它的外框
 const annotBox = (a) => {
-  const wide = a.text.replace(/[\u0000-ÿ]/g, '').length;
-  return { x: a.x, y: a.y, w: wide * 12 + (a.text.length - wide) * 7, h: 18 };
+  assert.ok(a.w > 0 && a.h > 0, `标注 ${a.text} 没有外框`);
+  return { x: a.x, y: a.y, w: a.w, h: a.h };
 };
 
 test('单行跳连：每一课的连线点和标签位置都在画布内，画布高度逐课不变', () => {
@@ -230,4 +230,121 @@ test('绕行线不穿过同一课可见的标注文字', () => {
     }
     for (const pt of e.points) assert.ok(pt.y <= s.height && pt.y >= 0);
   }
+});
+
+// ---- 密集图：结构上和真实的迁移课程一样密（6 列 4 行、16 个节点、约 30 条连线和 30 条标注） ----
+const dense = loadFixture('dense-diagram');
+const densePanel = dense.growth.find((g) => g.kind === 'diagram');
+const denseAt = (id) => plain(C.diagramAt(densePanel, dense.lessons, id));
+const denseLessons = dense.lessons.map((l) => l.id);
+
+// 线段是否穿过矩形内部（只碰到边不算），斜线也算得准
+const segCrossesRect = (p, q, r, pad = 0) => {
+  const x1 = r.x - pad, x2 = r.x + r.w + pad, y1 = r.y - pad, y2 = r.y + r.h + pad;
+  const dx = q.x - p.x, dy = q.y - p.y;
+  let t0 = 0, t1 = 1;
+  for (const [pp, qq] of [[-dx, p.x - x1], [dx, x2 - p.x], [-dy, p.y - y1], [dy, y2 - p.y]]) {
+    if (pp === 0) { if (qq <= 0) return false; continue; }
+    const t = qq / pp;
+    if (pp < 0) { if (t > t1) return false; t0 = Math.max(t0, t); } else { if (t < t0) return false; t1 = Math.min(t1, t); }
+  }
+  return t0 < t1;
+};
+const pathCrosses = (pts, r, pad) => pts.slice(1).some((q, i) => segCrossesRect(pts[i], q, r, pad));
+const rectsMeet = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const onBorder = (pt, r) => {
+  const inX = pt.x >= r.x - 1 && pt.x <= r.x + r.w + 1, inY = pt.y >= r.y - 1 && pt.y <= r.y + r.h + 1;
+  const nearX = Math.abs(pt.x - r.x) <= 1 || Math.abs(pt.x - r.x - r.w) <= 1;
+  const nearY = Math.abs(pt.y - r.y) <= 1 || Math.abs(pt.y - r.y - r.h) <= 1;
+  return inX && inY && (nearX || nearY);
+};
+
+test('密集图：样例本身是密的，且校验 0 错误 0 警告', () => {
+  const r = plain(C.validateCourse(dense, { dirName: 'dense-diagram' }));
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.warnings, []);
+  assert.equal(densePanel.nodes.length, 16);
+  assert.ok(densePanel.edges.length >= 28 && densePanel.annotations.length >= 28);
+});
+
+test('密集图：标签分行，最多两行', () => {
+  for (const id of denseLessons) {
+    for (const n of denseAt(id).nodes) {
+      assert.ok(Array.isArray(n.lines) && n.lines.length >= 1 && n.lines.length <= 2, `${id} ${n.id} lines`);
+      if (n.label.includes('\n')) assert.deepEqual(n.lines, n.label.split('\n'), `${id} ${n.id}`);
+      else assert.deepEqual(n.lines, [n.label], `${id} ${n.id}`);
+    }
+  }
+});
+
+test('密集图：标注是节点上方的小标签，互不重叠，不盖住节点', () => {
+  for (const id of denseLessons) {
+    const s = denseAt(id);
+    const nodeOf = Object.fromEntries(s.nodes.map((n) => [n.id, n]));
+    assert.ok(s.annotations.length > 0);
+    for (const a of s.annotations) {
+      assert.ok(a.w > 0 && a.h > 0, `${id} ${a.text} 没有外框`);
+      assert.ok(a.x >= 0 && a.y >= 0 && a.x + a.w <= s.width && a.y + a.h <= s.height, `${id} ${a.text} 超出画布`);
+      assert.ok(a.y + a.h <= nodeOf[a.node].y, `${id} ${a.text} 不在节点上方`);
+      for (const n of s.nodes) assert.equal(rectsMeet(a, n), false, `${id} ${a.text} 盖住节点 ${n.id}`);
+    }
+    for (const n of s.nodes) {
+      const mine = s.annotations.filter((a) => a.node === n.id);
+      assert.ok(mine.length <= 3, `${id} ${n.id} 画了 ${mine.length} 条标注`);
+      mine.forEach((a, i) => mine.slice(i + 1).forEach((b) => assert.equal(rectsMeet(a, b), false, `${id} ${a.text} 和 ${b.text} 重叠`)));
+    }
+  }
+  assert.equal(denseAt('dispatch').annotations.filter((a) => a.node === 'brain').length, 3, '第一行的节点也能放 3 条');
+});
+
+test('密集图：不绕行的连线是两点直线，端点落在两端节点的边缘上', () => {
+  let diagonal = 0;
+  for (const id of denseLessons) {
+    const s = denseAt(id);
+    const nodeOf = Object.fromEntries(s.nodes.map((n) => [n.id, n]));
+    for (const e of s.edges) {
+      const a = nodeOf[e.from], b = nodeOf[e.to];
+      const center = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+      const others = s.nodes.filter((n) => n !== a && n !== b);
+      const straightClear = !others.some((n) => segCrossesRect(center(a), center(b), n, 4));
+      if (straightClear) assert.equal(e.points.length, 2, `${id} ${e.from}→${e.to} 直线不穿过别的节点，却画成 ${e.points.length} 个点`);
+      if (e.points.length === 2) {
+        assert.ok(onBorder(e.points[0], a), `${id} ${e.from}→${e.to} 起点 ${JSON.stringify(e.points[0])} 不在 ${e.from} 边上`);
+        assert.ok(onBorder(e.points[1], b), `${id} ${e.from}→${e.to} 终点 ${JSON.stringify(e.points[1])} 不在 ${e.to} 边上`);
+        if (e.points[0].x !== e.points[1].x && e.points[0].y !== e.points[1].y) diagonal++;
+      }
+    }
+  }
+  assert.ok(diagonal > 0, '应有斜线');
+});
+
+test('密集图：任何连线都不穿过端点以外的节点', () => {
+  for (const id of denseLessons) {
+    const s = denseAt(id);
+    for (const e of s.edges) {
+      for (const n of s.nodes.filter((x) => x.id !== e.from && x.id !== e.to)) {
+        assert.equal(pathCrosses(e.points, n), false, `${id} ${e.from}→${e.to} 穿过节点 ${n.id}：${JSON.stringify(e.points)}`);
+      }
+    }
+  }
+});
+
+test('密集图：全部内容在画布内，画布大小逐课不变', () => {
+  const sizes = new Set();
+  const positions = new Map();
+  for (const id of denseLessons) {
+    const s = denseAt(id);
+    sizes.add(`${s.width}×${s.height}`);
+    const inside = (x, y) => x >= 0 && y >= 0 && x <= s.width && y <= s.height;
+    for (const r of [...s.nodes, ...s.annotations, ...s.groups]) {
+      assert.ok(inside(r.x, r.y) && inside(r.x + r.w, r.y + r.h), `${id} ${JSON.stringify(r)} 超出 ${s.width}×${s.height}`);
+    }
+    for (const e of s.edges) for (const pt of e.points) assert.ok(inside(pt.x, pt.y), `${id} ${e.from}→${e.to} ${JSON.stringify(pt)}`);
+    for (const n of s.nodes) {
+      const key = `${n.x},${n.y}`;
+      if (positions.has(n.id)) assert.equal(positions.get(n.id), key, `${n.id} 换了位置`);
+      positions.set(n.id, key);
+    }
+  }
+  assert.equal(sizes.size, 1, `画布大小逐课变化：${[...sizes]}`);
 });
