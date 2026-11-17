@@ -2,11 +2,14 @@
 # learn-anything 的安装脚本：对每个 Claude Code 配置目录添加本地 marketplace、安装 plugin，并按需配置课程目录。
 # 兼容 macOS 自带的 bash 3.2：不用关联数组、mapfile、${var,,}。
 #
-# 用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--uninstall] [--dry-run]
+# 用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]
 #   --courses-dir <绝对路径>  安装后把 plugin 的 courses_dir 配置为这个目录（安装时才有意义）
 #   --config-dir <目录>       只处理给出的配置目录，可重复；不给时处理默认目录、~/.claude-ccswitch（存在时）、
-#                             以及环境变量 CLAUDE_CONFIG_DIR 指向的目录（已设置且不同于前两者时）
-#   --uninstall               卸载 plugin 并移除 marketplace（不动课程目录里的任何文件）
+#                             以及环境变量 CLAUDE_CONFIG_DIR 指向的目录（已设置且不同于前两者时）。
+#                             目录不存在时打印一行提示，照常继续
+#   --reinstall               改了仓库之后用：plugin 已安装就先卸载再安装（marketplace 保留），没安装就直接安装。
+#                             Claude Code 可能用的是缓存里的拷贝，重装才会换成仓库里的新版
+#   --uninstall               卸载 plugin 并移除 marketplace（不动课程目录里的任何文件）；不能与 --reinstall 同用
 #   --dry-run                 只打印命令（每条一行，以 "+ " 开头），不执行
 #
 # 默认配置目录（~/.claude）的命令不加前缀；其他目录的命令加 CLAUDE_CONFIG_DIR=<目录> 前缀。
@@ -14,6 +17,7 @@
 # marketplace 已添加就不再添加，plugin 已安装就不再安装；给了 --courses-dir 时 configure 总会执行。
 # 卸载同理：目标已经不在就跳过那一步。读不出现状（命令失败或输出看不懂）时不猜：安装当作「还没有」照常添加和安装，
 # 卸载当作「还在」照常卸载。--dry-run 也会打印这两条只读命令，并把 add、install、uninstall、remove 标注为「已存在（已不在）则跳过」。
+# --reinstall 读不出现状时当作「已安装」，先卸载再安装。
 # 退出码：0 成功，1 缺少 claude 或 node、HOME 不可用、或某条命令失败，2 参数不对。
 set -u
 
@@ -22,7 +26,7 @@ PLUGIN=learn-anything@$MARKETPLACE
 
 die_usage() {
   echo "install.sh: $1" >&2
-  echo "用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--uninstall] [--dry-run]" >&2
+  echo "用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]" >&2
   exit 2
 }
 
@@ -57,6 +61,7 @@ courses_dir=
 courses_given=0
 config_dirs=()
 uninstall=0
+reinstall=0
 dry_run=0
 
 while [ $# -gt 0 ]; do
@@ -82,11 +87,14 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --uninstall) uninstall=1; shift ;;
+    --reinstall) reinstall=1; shift ;;
     --dry-run) dry_run=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die_usage "未知参数：$1" ;;
   esac
 done
+
+[ "$uninstall" -eq 1 ] && [ "$reinstall" -eq 1 ] && die_usage "--reinstall 和 --uninstall 不能同时给"
 
 if [ "$courses_given" -eq 1 ]; then
   [ -n "$courses_dir" ] || die_usage "--courses-dir 的值不能为空"
@@ -167,6 +175,7 @@ add_target() {
 if [ "${#config_dirs[@]}" -gt 0 ]; then
   i=0
   while [ "$i" -lt "${#config_dirs[@]}" ]; do
+    [ -d "${config_dirs[$i]}" ] || echo "提示：配置目录 ${config_dirs[$i]} 还不存在，照常继续（claude 会按需创建它）。" >&2
     add_target "${config_dirs[$i]}"
     i=$((i + 1))
   done
@@ -337,7 +346,15 @@ while [ "$i" -lt "${#targets[@]}" ]; do
       claude_step "$dir" "" "已添加则跳过" plugin marketplace add "$repo_root" || { fail_step "添加 marketplace"; continue; }
     fi
     claude_state "$dir" plugin "$PLUGIN"
-    if [ "$dry_run" -eq 0 ] && [ "$state" -eq 0 ]; then
+    if [ "$reinstall" -eq 1 ]; then
+      # 重装：已安装（或读不出现状）就先卸载；卸载失败就不再往下装，免得装出两份
+      if [ "$dry_run" -eq 0 ] && [ "$state" -eq 1 ]; then
+        echo "plugin $PLUGIN 还没安装，直接安装"
+      else
+        claude_step "$dir" "" "未安装则跳过" plugin uninstall "$PLUGIN" --scope user || { fail_step "卸载 plugin（重装）"; continue; }
+      fi
+      claude_step "$dir" "" "" plugin install "$PLUGIN" --scope user || { fail_step "安装 plugin"; continue; }
+    elif [ "$dry_run" -eq 0 ] && [ "$state" -eq 0 ]; then
       echo "plugin $PLUGIN 已安装，跳过"
     else
       claude_step "$dir" "" "已安装则跳过" plugin install "$PLUGIN" --scope user || { fail_step "安装 plugin"; continue; }
@@ -347,6 +364,10 @@ while [ "$i" -lt "${#targets[@]}" ]; do
     fi
   fi
 done
+
+if [ "$reinstall" -eq 1 ] && [ -z "$courses_dir" ]; then
+  echo "提示：重装后请确认课程目录的配置还在：在 Claude Code 里运行 /plugin configure $PLUGIN 查看，或者带上 --courses-dir 重新运行本脚本。"
+fi
 
 if [ "$failed" -ne 0 ]; then
   echo "有命令执行失败：${failed_dirs# }。见上面的输出。" >&2

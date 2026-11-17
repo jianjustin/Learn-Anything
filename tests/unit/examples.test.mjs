@@ -65,6 +65,21 @@ test('README 中英文都在，写了安装命令', () => {
   for (const f of ['README.md', 'README.zh-CN.md']) assert.match(readFileSync(path.join(ROOT, f), 'utf8'), /bash install\.sh/);
 });
 
+test('README 中英文：改了仓库后用 --reinstall，页面模板用 refresh-pages.mjs 刷新，不再说 install 测试只用 --dry-run', () => {
+  const zh = readFileSync(path.join(ROOT, 'README.zh-CN.md'), 'utf8');
+  const en = readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  for (const t of [zh, en]) {
+    assert.match(t, /bash install\.sh --reinstall/);
+    assert.match(t, /scripts\/refresh-pages\.mjs <[^>]+>/);
+  }
+  assert.doesNotMatch(zh, /下次会话生效/);
+  assert.doesNotMatch(zh, /全部使用 `--dry-run`/);
+  assert.doesNotMatch(en, /take effect in the next session/);
+  assert.doesNotMatch(en, /use `--dry-run` only/);
+  assert.match(zh, /某条命令失败时[^。]*退出码 1/);
+  assert.match(en, /exits with code 1 when[^.]*a command fails/);
+});
+
 test('面试示例是源示例的原样迁移：保留了小数位置', () => {
   const nodes = data['realtime-billing'].growth.find((p) => p.kind === 'diagram').nodes;
   assert.ok(nodes.some((n) => !Number.isInteger(n.row) || !Number.isInteger(n.col)));

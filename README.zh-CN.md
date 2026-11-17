@@ -31,7 +31,9 @@ bash install.sh --courses-dir <课程目录>
 2. `claude plugin install learn-anything@learn-anything-local --scope user`；
 3. 给了 `--courses-dir` 时，`claude plugin configure learn-anything@learn-anything-local --values-stdin`，把课程目录配置进去。
 
-plugin 直接从仓库源目录加载，之后仓库里的改动在下次会话生效。安装完成后开一个新会话。
+安装完成后开一个新会话。
+
+**改了仓库之后运行 `bash install.sh --reinstall`。** Claude Code 安装本地 marketplace 里的 plugin 时，可能把它复制到自己的缓存目录里使用，而不是直接读仓库源目录；那样的话会话用的仍是旧版，普通的重复运行又会因为「已安装」而跳过。`--reinstall` 对每个配置目录先卸载再安装 plugin（marketplace 保留），然后开一个新会话。到底是缓存里的拷贝还是就地加载，会在第一次实机安装时确认。重装时可以同时带上 `--courses-dir`；没带时脚本会在结尾提醒你确认课程目录的配置还在。
 
 **重复运行是安全的。** 每个目录先用只读命令 `claude plugin marketplace list --json` 和 `claude plugin list --json` 看现状：marketplace 已经添加就不再添加，plugin 已经安装（user 范围）就不再安装；给了 `--courses-dir` 时 `configure` 总会执行。所以改课程目录只要重新运行 `bash install.sh --courses-dir <新目录>`。读不出现状（命令失败或输出看不懂）时不猜，照常添加和安装。
 
@@ -44,8 +46,10 @@ plugin 直接从仓库源目录加载，之后仓库里的改动在下次会话�
 其他选项：
 
 - `--dry-run`：只打印要执行的命令（每条一行，以 `+ ` 开头），不执行。想先看看会做什么时用它。上面两条只读的 list 命令也会打印出来；`add` 和 `install` 行末标注「已添加（已安装）则跳过」，表示真正运行时现状已经满足就不会执行。
-- `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace，已经不在的那一步跳过。不会动课程目录里的任何文件。
-- 参数不认识、`--courses-dir` 的值为空或不是绝对路径时，脚本以退出码 2 退出；找不到 `claude`、node 低于 20、`HOME` 没有设置、或者某条命令失败时，以退出码 1 退出。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
+- `--reinstall`：plugin 已安装就先卸载再安装，没安装就直接安装；marketplace 保留。读不出现状时当作已安装。
+- `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace，已经不在的那一步跳过。不会动课程目录里的任何文件。不能和 `--reinstall` 同时给。
+- `--config-dir` 指向的目录不存在时，脚本打印一行提示后照常继续。
+- 退出码：参数不认识、`--courses-dir` 的值为空或不是绝对路径、`--reinstall` 和 `--uninstall` 同时给时，退出码 2；找不到 `claude`、node 低于 20、`HOME` 没有设置时，退出码 1；某条命令失败时也是退出码 1。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
 
 ## 课程存在哪
 
@@ -63,6 +67,12 @@ plugin 直接从仓库源目录加载，之后仓库里的改动在下次会话�
 设置或修改这个目录有两种办法：重新运行 `bash install.sh --courses-dir <新目录>`，或者在 Claude Code 里运行 `/plugin configure learn-anything@learn-anything-local`。没配置时，skill 会停下并告诉你怎么配置，不会在别的位置建课。
 
 `course-data.js` 的内容是 `window.LEARN_COURSE = <严格 JSON>;`。脚本和提醒 hook 只用 `JSON.parse` 读它，不执行它。
+
+每门课的 `course.html` 和课程目录里的 `index.html` 是建课时从 plugin 复制过去的，plugin 更新后不会自己变。页面模板有了修改，运行下面的命令把两种页面重新复制到课程目录和每门登记过的课里；它只覆盖这两种文件，不碰 `course-data.js` 和别的文件：
+
+```bash
+node plugins/learn-anything/skills/learn/scripts/refresh-pages.mjs <课程目录>
+```
 
 ## 开课和续学
 
@@ -126,7 +136,7 @@ research: run         # run：照常调研；skip：不调研
 node plugins/learn-anything/skills/learn/scripts/migrate-interview.mjs <旧课程目录> <课程目录>
 ```
 
-脚本只读旧目录，把新课程写到 `<课程目录>/<课程名>/` 并登记；转换后校验，并核对课数、每课卡片数、各面板元素数与源文件一致。旧课程没有记录过掌握的证据，所以迁移来的课程全部显示为「已讲」。
+`<课程目录>` 必须是绝对路径，`<旧课程目录>` 可以是相对路径。脚本只读旧目录，把新课程写到 `<课程目录>/<课程名>/` 并登记；转换后校验，并核对课数、每课卡片数、各面板元素数与源文件一致。旧课程没有记录过掌握的证据，所以迁移来的课程全部显示为「已讲」。旧课程的待回顾是搁置的问题和备忘，不迁成待回顾，而是合成一张标题为「迁移来的备忘」的提示卡，放在断点那一课的最前面（这一课因此比源文件多一张卡片）。
 
 ## 开发与测试
 
@@ -147,7 +157,7 @@ bash tests/run-all.sh
 
 它依次做：把两份页面模板同步到 `examples/`；单元测试（`node --test tests/unit`）；页面测试（`node --test tests/e2e`）；`bash tests/install.test.sh`；`claude plugin validate plugins/learn-anything --strict`。每一步都会跑，任何一步失败，最后退出码为 1。
 
-页面测试需要 `playwright-core` 和本机的 Chrome（或 Chromium）。`playwright-core` 在本地、`PLAYWRIGHT_CORE_PATH` 指向的位置或 npm 全局目录里找得到即可。页面测试被跳过（比如浏览器启动不了）算失败。`install.sh` 的测试全部使用 `--dry-run`，不会改动任何真实的 Claude Code 配置。
+页面测试需要 `playwright-core` 和本机的 Chrome（或 Chromium）。`playwright-core` 在本地、`PLAYWRIGHT_CORE_PATH` 指向的位置或 npm 全局目录里找得到即可。页面测试被跳过（比如浏览器启动不了）算失败。`install.sh` 的测试一部分用 `--dry-run`，一部分真正执行；真正执行时 `HOME` 是临时目录，`PATH` 最前面的 `claude` 是一个只记录调用的桩，不会改动任何真实的 Claude Code 配置。
 
 单独校验一门课的数据：
 

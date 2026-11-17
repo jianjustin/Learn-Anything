@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh 的测试。全部使用 --dry-run（或者在到达 claude 之前就会退出的参数），不触碰任何真实的 Claude Code 配置。
+# install.sh 的测试。前半部分用 --dry-run，后半部分真正执行，但执行到的 claude 是下面的桩，不触碰任何真实的 Claude Code 配置。
 # 任何一项不符，退出码为 1。
 #
 # 防护：整个文件在一个全新的临时 HOME 里运行，PATH 最前面是一个桩 claude，真实的配置碰不到。
@@ -391,6 +391,61 @@ export STUB_LIST_FAIL=1
 expect_code "卸载，list 失败" "$code" 0
 n=$(removing | wc -l | tr -d ' ')
 if [ "$n" = 2 ]; then ok; else bad "卸载，list 失败：读不出现状时照常卸载，应有 2 条，实际 $n 条"; fi
+reset_stub
+
+# 11. --reinstall：plugin 已安装就先卸载再安装（marketplace 保留），没安装就直接安装 --------
+reset_stub
+out=$("$BASH_BIN" install.sh --reinstall --dry-run --config-dir /tmp/a 2>&1); code=$?
+expect_code "重装 dry-run" "$code" 0
+plus=$(plus_lines "$out")
+expect_count "重装 dry-run" "$plus" '^+ ' 3
+expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 1p)" 'marketplace add .*  # 已添加则跳过'
+expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 2p)" 'plugin uninstall learn-anything@learn-anything-local --scope user  # 未安装则跳过'
+expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 3p)" 'plugin install learn-anything@learn-anything-local --scope user$'
+expect_has "重装没给课程目录时提示确认配置" "$out" '重装后请确认课程目录的配置还在'
+expect_log "dry-run 不执行" "plugin" 0
+
+reset_stub
+export STUB_MARKET_PRESENT=1 STUB_PLUGIN_PRESENT=1
+out=$("$BASH_BIN" install.sh --reinstall --config-dir /tmp/a --config-dir /tmp/b --courses-dir /tmp/c 2>&1); code=$?
+expect_code "重装，已安装" "$code" 0
+expect_log "重装，已安装" "plugin marketplace add" 0
+expect_log "重装，已安装" "plugin marketplace remove" 0
+expect_log "重装，已安装" "plugin uninstall learn-anything@learn-anything-local --scope user" 2
+expect_log "重装，已安装" "plugin install learn-anything@learn-anything-local --scope user" 2
+expect_log "重装，已安装" "plugin configure learn-anything@learn-anything-local --values-stdin" 2
+order=$(grep -F "CCD=/tmp/a" "$STUB_LOG" | tr '\037' ' ' | sed -n 's/^CCD=[^ ]* plugin \([a-z]*\) .*$/\1/p' | tr '\n' ',')
+if [ "$order" = "marketplace,list,uninstall,install,configure," ]; then ok; else bad "重装，已安装：命令顺序不对：$order"; fi
+expect_not "给了课程目录就不提示" "$out" '重装后请确认课程目录的配置还在'
+
+reset_stub
+export STUB_MARKET_PRESENT=1
+out=$("$BASH_BIN" install.sh --reinstall --config-dir /tmp/a 2>&1); code=$?
+expect_code "重装，未安装" "$code" 0
+expect_log "重装，未安装" "plugin uninstall" 0
+expect_log "重装，未安装" "plugin install learn-anything@learn-anything-local --scope user" 1
+expect_log "重装，未安装" "plugin configure" 0
+expect_has "重装，未安装的提示" "$out" '重装后请确认课程目录的配置还在'
+
+reset_stub
+"$BASH_BIN" install.sh --reinstall --uninstall --dry-run --config-dir /tmp/a >/dev/null 2>&1; expect_code "重装和卸载同时给" "$?" 2
+"$BASH_BIN" install.sh --uninstall --reinstall --config-dir /tmp/a >/dev/null 2>&1; expect_code "卸载和重装同时给" "$?" 2
+expect_log "重装和卸载同时给：什么都不执行" "plugin" 0
+
+# 12. --config-dir 指向的目录不存在：一行警告，照常继续
+reset_stub
+missing_cfg="$SANDBOX/没有的 配置"
+out=$("$BASH_BIN" install.sh --dry-run --config-dir "$missing_cfg" 2>&1); code=$?
+expect_code "配置目录不存在" "$code" 0
+expect_count "配置目录不存在" "$out" "提示：配置目录 $missing_cfg 还不存在" 1
+expect_count "配置目录不存在时照常处理" "$(plus_lines "$out")" '^+ ' 2
+mkdir -p "$SANDBOX/cfg-exists"
+out=$("$BASH_BIN" install.sh --dry-run --config-dir "$SANDBOX/cfg-exists" 2>&1)
+expect_not "配置目录存在时不提示" "$out" '提示：配置目录'
+out=$("$BASH_BIN" install.sh --config-dir "$missing_cfg" 2>&1); code=$?
+expect_code "配置目录不存在，真实执行" "$code" 0
+expect_has "配置目录不存在，真实执行" "$out" "提示：配置目录 $missing_cfg 还不存在"
+expect_log "配置目录不存在，真实执行" "plugin install" 1
 reset_stub
 
 # 8. 脚本里没有 bash 3.2 不支持的写法
