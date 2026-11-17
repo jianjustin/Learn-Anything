@@ -271,7 +271,7 @@ window.LEARN_COURSE = {
   1. 发题时先把题目和评分标准写进本课的 `practice` 卡，不写参考答案，然后停下等作答。
   2. 作答后评分。主观作答交给 `answer-grader` 子代理；客观题和能直接运行验证的练习当场判。学习者说「直接评」时不用子代理。
   3. 补全这一条的 `yours`、`ok`、`why`、`answer`。
-  4. 表现出掌握：本课 `mastered` 设为 `true`。否则往 `review` 里加一条，写明缺口。
+  4. 按这一条的结果处理。没通过：往 `review` 里加一条，写明缺口，并把本课 `mastered` 设为 `false`。通过，且 `review` 里没有指向本课的条目：本课 `mastered` 设为 `true`。
 - 学习者说「跳过」时不做检验：`mastered` 保持 `false`，不加待回顾。题目已经发出的，把这一条记为 `skipped: true`。
 - 课末：对话里给 3–5 条小结；写入本课卡片，至少有 `points` 和 `quote`；本课设为 `done`，下一课设为 `current`，`resume` 指向下一课。
 - 讲完就推进，检验没通过也不卡住进度。
