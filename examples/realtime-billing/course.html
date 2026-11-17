@@ -529,8 +529,9 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
   function isStr(v) { return typeof v === 'string'; }
   function isId(v) { return typeof v === 'string' && v.trim() !== ''; }
   function isPosInt(v) { return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= 1; }
-  // 网格位置从 1 开始，可以用 0.5 这样的小数微调
-  function isGridPos(v) { return typeof v === 'number' && isFinite(v) && v >= 1; }
+  // 网格位置从 1 开始，可以用 0.5 这样的小数微调；超过 GRID_MAX 只可能是笔误
+  var GRID_MAX = 100;
+  function isGridPos(v) { return typeof v === 'number' && isFinite(v) && v >= 1 && v <= GRID_MAX; }
   function show(v) { return typeof v === 'string' ? '"' + v + '"' : String(v); }
 
   // ---- 校验 ----
@@ -603,6 +604,9 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         ['rubric', 'answer', 'yours', 'why'].forEach(function (k) { optionalStr(ctx, ip, it, k); });
         if (it.ok !== undefined && typeof it.ok !== 'boolean') ctx.errors.push(ip + '.ok 应为布尔值');
         if (it.skipped !== undefined && typeof it.skipped !== 'boolean') ctx.errors.push(ip + '.skipped 应为布尔值');
+        if (it.skipped === true && (it.yours !== undefined || it.ok !== undefined)) {
+          ctx.errors.push(ip + ' 标了 skipped: true，就不应再有 yours 或 ok');
+        }
       });
     },
     table: function (ctx, p, c) {
@@ -705,9 +709,9 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
         else if (nodeIds[n.id]) ctx.errors.push(np + '.id 重复：' + n.id);
         else nodeIds[n.id] = true;
         requireStr(ctx, np, n, 'label');
-        if (!isGridPos(n.col)) ctx.errors.push(np + '.col 应为不小于 1 的数字（可以是小数）');
-        if (!isGridPos(n.row)) ctx.errors.push(np + '.row 应为不小于 1 的数字（可以是小数）');
-        if (n.span !== undefined && !isPosInt(n.span)) ctx.errors.push(np + '.span 应为大于 0 的整数');
+        if (!isGridPos(n.col)) ctx.errors.push(np + '.col 应为 1 到 ' + GRID_MAX + ' 之间的数字（可以是小数）');
+        if (!isGridPos(n.row)) ctx.errors.push(np + '.row 应为 1 到 ' + GRID_MAX + ' 之间的数字（可以是小数）');
+        if (n.span !== undefined && !(isPosInt(n.span) && n.span <= GRID_MAX)) ctx.errors.push(np + '.span 应为 1 到 ' + GRID_MAX + ' 之间的整数');
         if (n.style !== undefined) checkEnum(ctx, np + '.style', n.style, NODE_STYLE);
         checkSpan(ctx, np, n);
       });

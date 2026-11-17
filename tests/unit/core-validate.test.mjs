@@ -111,6 +111,9 @@ for (const [name, patch, field] of [
   ['span 是 NaN', { span: NaN }, 'span'],
   ['span 是 null', { span: null }, 'span'],
   ['span 是 true', { span: true }, 'span'],
+  ['col 大于 100', { col: 101 }, 'col'],
+  ['row 大于 100', { row: 100.5 }, 'row'],
+  ['span 大于 100', { span: 101 }, 'span'],
 ]) {
   test(`报错：${name}`, () => {
     const r = bad((d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 1, row: 1, since: 'first', ...patch }]); });
@@ -118,3 +121,24 @@ for (const [name, patch, field] of [
     assert.match(r.errors[0], new RegExp(`nodes\\[0\\]\\.${field}\\b`));
   });
 }
+
+test('网格位置和 span 可以取到 100', () => {
+  const r = bad((d) => { d.growth = diagram([{ id: 'a', label: 'A', col: 100, row: 100, span: 100, since: 'first' }]); });
+  assert.deepEqual(r.errors, []);
+});
+
+for (const [name, item] of [
+  ['skipped 和 yours 并存', { q: 'x', rubric: 'r', skipped: true, yours: '我的回答' }],
+  ['skipped 和 ok 并存', { q: 'x', rubric: 'r', skipped: true, ok: false }],
+  ['skipped 和 yours、ok 都并存', { q: 'x', rubric: 'r', skipped: true, yours: 'y', ok: true }],
+]) {
+  test(`报错：practice 条目${name}`, () => {
+    const r = bad((d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ q: 'ok' }, item] }]; });
+    assert.equal(r.errors.length, 1, r.errors.join('\n'));
+    assert.match(r.errors[0], /practice.*items\[1\].*skipped/);
+  });
+}
+
+test('practice 条目 skipped: false 时可以有 yours 和 ok', () => {
+  assert.deepEqual(bad((d) => { d.lessons[0].cards = [{ type: 'practice', items: [{ q: 'x', skipped: false, yours: 'y', ok: true }] }]; }).errors, []);
+});
