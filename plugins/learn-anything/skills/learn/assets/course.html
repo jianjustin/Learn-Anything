@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>课程</title>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- course-core：纯逻辑，页面、validate.mjs 和单元测试共用。
+     不碰 document、console、定时器等任何全局，只读写 window.CourseCore。
+     新增成员：在 `window.CourseCore = core` 之前加 `core.名字 = ...`。 -->
+<script id="course-core">
+(function () {
+  'use strict';
+  var core = {};
+
+  // ---- 常量 ----
+  core.CARD_TYPES = ['points', 'steps', 'quote', 'problem', 'qa', 'questions', 'practice', 'table', 'compare', 'chips', 'code', 'note', 'html'];
+  core.DEFAULT_CARD_TITLE = {
+    points: '要点', steps: '步骤', quote: '一句话总结', problem: '思考题', qa: '常见追问',
+    questions: '你问过的', practice: '你的练习', table: '表格', compare: '方案对比',
+    chips: '标签', code: '代码', note: '提示', html: '补充'
+  };
+
+  var LESSON_STATUS = ['todo', 'current', 'done', 'skipped'];
+  var RESEARCHED = ['yes', 'no', 'skipped'];
+  var RESOURCE_KIND = ['book', 'course', 'doc', 'paper', 'article', 'video', 'other'];
+  var PANEL_KIND = ['diagram', 'code', 'timeline'];
+  var NODE_STYLE = ['box', 'pill', 'outline', 'ghost'];
+  var EDGE_STYLE = ['solid', 'dashed'];
+  var BETTER = ['lower', 'higher'];
+  // 这三种卡片记录的是学习过程，不是资料内容，不显示来源标记
+  var NO_SOURCE_TAG = ['questions', 'practice', 'note'];
+
+  // ---- 类型判断 ----
+  function at(path, key) { return path ? path + '.' + key : key; }
+  function isObj(v) { return typeof v === 'object' && v !== null && !Array.isArray(v); }
+  function isStr(v) { return typeof v === 'string'; }
+  function isId(v) { return typeof v === 'string' && v.trim() !== ''; }
+  function isPosInt(v) { return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v >= 1; }
+  function show(v) { return typeof v === 'string' ? '"' + v + '"' : String(v); }
+
+  // ---- 校验 ----
+  // 校验器只往 ctx.errors / ctx.warnings 里加字符串，路径写成 lessons[0].cards[1].items 这样的形式
+  function checkEnum(ctx, path, v, allowed) {
+    if (allowed.indexOf(v) < 0) ctx.errors.push(path + ' 取值应为 ' + allowed.join('、') + '，实际是 ' + show(v));
+  }
+  function requireStr(ctx, path, o, key) {
+    if (!isStr(o[key])) ctx.errors.push(at(path, key) + ' 缺失或不是字符串');
+  }
+  function optionalStr(ctx, path, o, key) {
+    if (o[key] !== undefined && !isStr(o[key])) ctx.errors.push(at(path, key) + ' 应为字符串');
+  }
+  function requireArr(ctx, path, o, key) {
+    if (!Array.isArray(o[key])) { ctx.errors.push(at(path, key) + ' 缺失或不是数组'); return false; }
+    return true;
+  }
+  function eachItem(ctx, path, arr, fn) {
+    for (var i = 0; i < arr.length; i++) {
+      var p = path + '[' + i + ']';
+      if (!isObj(arr[i])) ctx.errors.push(p + ' 应为对象');
+      else fn(p, arr[i], i);
+    }
+  }
+  function strArray(ctx, path, v) {
+    if (!Array.isArray(v) || v.some(function (x) { return !isStr(x); })) ctx.errors.push(path + ' 应为字符串数组');
+  }
+
+  function validateResources(ctx, d) {
+    ctx.resourceIds = Object.create(null);
+    if (!requireArr(ctx, 'resources', d, 'resources')) return;
+    eachItem(ctx, 'resources', d.resources, function (p, r) {
+      if (!isId(r.id)) ctx.errors.push(p + '.id 缺失或为空');
+      else if (ctx.resourceIds[r.id]) ctx.errors.push(p + '.id 重复：' + r.id);
+      else ctx.resourceIds[r.id] = true;
+      checkEnum(ctx, p + '.kind', r.kind, RESOURCE_KIND);
+      requireStr(ctx, p, r, 'title');
+      requireStr(ctx, p, r, 'note');
+      optionalStr(ctx, p, r, 'author');
+      optionalStr(ctx, p, r, 'url');
+    });
+  }
+
+  function checkRefs(ctx, path, refs) {
+    if (refs === undefined) return;
+    if (!Array.isArray(refs) || refs.some(function (x) { return !isStr(x); })) {
+      ctx.errors.push(path + '.refs 应为资料 id 的数组');
+      return;
+    }
+    refs.forEach(function (id) {
+      if (!ctx.resourceIds[id]) ctx.errors.push(path + '.refs 引用了不存在的资料：' + id);
+    });
+  }
+
+  // 每种已知卡片的字段检查；p 是卡片路径，c 是卡片
+  var CARD_CHECKS = {
+    points: stringItems, steps: stringItems, chips: stringItems,
+    quote: function (ctx, p, c) { requireStr(ctx, p, c, 'text'); },
+    note: function (ctx, p, c) { requireStr(ctx, p, c, 'text'); },
+    html: function (ctx, p, c) { requireStr(ctx, p, c, 'html'); },
+    code: function (ctx, p, c) { requireStr(ctx, p, c, 'code'); optionalStr(ctx, p, c, 'language'); },
+    problem: function (ctx, p, c) {
+      requireStr(ctx, p, c, 'question'); optionalStr(ctx, p, c, 'approach'); optionalStr(ctx, p, c, 'answer');
+    },
+    qa: qaItems, questions: qaItems,
+    practice: function (ctx, p, c) {
+      if (!requireArr(ctx, p, c, 'items')) return;
+      eachItem(ctx, p + '.items', c.items, function (ip, it) {
+        requireStr(ctx, ip, it, 'q');
+        ['rubric', 'answer', 'yours', 'why'].forEach(function (k) { optionalStr(ctx, ip, it, k); });
+        if (it.ok !== undefined && typeof it.ok !== 'boolean') ctx.errors.push(ip + '.ok 应为布尔值');
+      });
+    },
+    table: function (ctx, p, c) {
+      if (c.headers !== undefined) strArray(ctx, p + '.headers', c.headers);
+      if (!requireArr(ctx, p, c, 'rows')) return;
+      c.rows.forEach(function (row, i) { strArray(ctx, p + '.rows[' + i + ']', row); });
+    },
+    compare: function (ctx, p, c) {
+      optionalStr(ctx, p, c, 'conclusion');
+      if (!requireArr(ctx, p, c, 'options')) return;
+      eachItem(ctx, p + '.options', c.options, function (op, o) {
+        requireStr(ctx, op, o, 'name');
+        strArray(ctx, op + '.pros', o.pros);
+        strArray(ctx, op + '.cons', o.cons);
+      });
+    }
+  };
+  function stringItems(ctx, p, c) { strArray(ctx, p + '.items', c.items); }
+  function qaItems(ctx, p, c) {
+    if (!requireArr(ctx, p, c, 'items')) return;
+    eachItem(ctx, p + '.items', c.items, function (ip, it) { requireStr(ctx, ip, it, 'q'); requireStr(ctx, ip, it, 'a'); });
+  }
+
+  function validateCards(ctx, path, cards) {
+    eachItem(ctx, path, cards, function (p, c) {
+      if (!isStr(c.type)) { ctx.errors.push(p + '.type 缺失或不是字符串'); return; }
+      var label = p + '（' + c.type + '）';
+      optionalStr(ctx, p, c, 'title');
+      if (c.optional !== undefined && typeof c.optional !== 'boolean') ctx.errors.push(label + ' 的 optional 应为布尔值');
+      checkRefs(ctx, p, c.refs);
+      if (core.CARD_TYPES.indexOf(c.type) < 0) {
+        ctx.warnings.push(p + ' 的卡片类型 ' + c.type + ' 未知，按原样显示内容');
+        return;
+      }
+      // 把卡片类型写进路径，报错时一眼看出是哪种卡片缺字段
+      CARD_CHECKS[c.type](ctx, label, c);
+    });
+  }
+
+  function validateLessons(ctx, d) {
+    ctx.lessonIndex = Object.create(null);
+    if (!Array.isArray(d.lessons) || d.lessons.length === 0) {
+      ctx.errors.push('lessons 缺失、不是数组或为空');
+      return;
+    }
+    var current = [];
+    eachItem(ctx, 'lessons', d.lessons, function (p, l, i) {
+      if (!isId(l.id)) ctx.errors.push(p + '.id 缺失或为空');
+      else if (ctx.lessonIndex[l.id] !== undefined) ctx.errors.push(p + '.id 重复：' + l.id);
+      else ctx.lessonIndex[l.id] = i;
+      requireStr(ctx, p, l, 'title');
+      requireStr(ctx, p, l, 'summary');
+      if (l.optional !== undefined && typeof l.optional !== 'boolean') ctx.errors.push(p + '.optional 应为布尔值');
+      checkEnum(ctx, p + '.status', l.status, LESSON_STATUS);
+      if (l.status === 'current') current.push(l.id);
+      if (typeof l.mastered !== 'boolean') ctx.errors.push(p + '.mastered 缺失或不是布尔值');
+      ctx.lessonsToCheck.push({ p: p, l: l });
+    });
+    if (current.length > 1) ctx.errors.push('lessons 里有 ' + current.length + ' 个 current（' + current.join('、') + '），最多一个');
+  }
+
+  // 课程 id 都登记完才能检查 readings 和卡片引用，所以拆成第二遍
+  function validateLessonContent(ctx) {
+    ctx.lessonsToCheck.forEach(function (x) {
+      var p = x.p, l = x.l;
+      if (requireArr(ctx, p, l, 'readings')) {
+        eachItem(ctx, p + '.readings', l.readings, function (rp, r) {
+          if (!ctx.resourceIds[r.resource]) ctx.errors.push(rp + '.resource 引用了不存在的资料：' + show(r.resource));
+          requireStr(ctx, rp, r, 'where');
+        });
+      }
+      if (requireArr(ctx, p, l, 'cards')) validateCards(ctx, p + '.cards', l.cards);
+    });
+  }
+
+  function lessonRef(ctx, path, id) {
+    if (ctx.lessonIndex[id] === undefined) { ctx.errors.push(path + ' 引用了不存在的课：' + show(id)); return -1; }
+    return ctx.lessonIndex[id];
+  }
+
+  // since 必填、until 可选且必须晚于 since
+  function checkSpan(ctx, p, o) {
+    if (!isStr(o.since)) { ctx.errors.push(p + '.since 缺失或不是字符串'); return; }
+    var s = lessonRef(ctx, p + '.since', o.since);
+    if (o.until === undefined) return;
+    if (!isStr(o.until)) { ctx.errors.push(p + '.until 应为课程 id'); return; }
+    var u = lessonRef(ctx, p + '.until', o.until);
+    if (s >= 0 && u >= 0 && u <= s) ctx.errors.push(p + '.until（' + o.until + '）必须在 since（' + o.since + '）之后');
+  }
+
+  function checkNodeRef(ctx, path, nodeIds, id) {
+    if (!nodeIds[id]) ctx.errors.push(path + ' 引用了不存在的节点：' + show(id));
+  }
+
+  function validateDiagram(ctx, p, g) {
+    var nodeIds = Object.create(null);
+    if (requireArr(ctx, p, g, 'nodes')) {
+      eachItem(ctx, p + '.nodes', g.nodes, function (np, n) {
+        if (!isId(n.id)) ctx.errors.push(np + '.id 缺失或为空');
+        else if (nodeIds[n.id]) ctx.errors.push(np + '.id 重复：' + n.id);
+        else nodeIds[n.id] = true;
+        requireStr(ctx, np, n, 'label');
+        if (!isPosInt(n.col)) ctx.errors.push(np + '.col 应为大于 0 的整数');
+        if (!isPosInt(n.row)) ctx.errors.push(np + '.row 应为大于 0 的整数');
+        if (n.span !== undefined && !isPosInt(n.span)) ctx.errors.push(np + '.span 应为大于 0 的整数');
+        if (n.style !== undefined) checkEnum(ctx, np + '.style', n.style, NODE_STYLE);
+        checkSpan(ctx, np, n);
+      });
+    }
+    function optionalList(key, fn) {
+      if (g[key] === undefined) return;
+      if (requireArr(ctx, p, g, key)) eachItem(ctx, p + '.' + key, g[key], fn);
+    }
+    optionalList('edges', function (ep, e) {
+      checkNodeRef(ctx, ep + '.from', nodeIds, e.from);
+      checkNodeRef(ctx, ep + '.to', nodeIds, e.to);
+      optionalStr(ctx, ep, e, 'label');
+      if (e.style !== undefined) checkEnum(ctx, ep + '.style', e.style, EDGE_STYLE);
+      checkSpan(ctx, ep, e);
+    });
+    optionalList('groups', function (gp, grp) {
+      if (!isId(grp.id)) ctx.errors.push(gp + '.id 缺失或为空');
+      requireStr(ctx, gp, grp, 'label');
+      if (Array.isArray(grp.members)) grp.members.forEach(function (m, i) { checkNodeRef(ctx, gp + '.members[' + i + ']', nodeIds, m); });
+      else ctx.errors.push(gp + '.members 缺失或不是数组');
+      checkSpan(ctx, gp, grp);
+    });
+    optionalList('annotations', function (ap, a) {
+      checkNodeRef(ctx, ap + '.node', nodeIds, a.node);
+      requireStr(ctx, ap, a, 'text');
+      checkSpan(ctx, ap, a);
+    });
+    optionalList('routes', function (rp, r) {
+      if (!isStr(r.lesson)) ctx.errors.push(rp + '.lesson 缺失或不是字符串');
+      else lessonRef(ctx, rp + '.lesson', r.lesson);
+      if (Array.isArray(r.steps)) r.steps.forEach(function (s, i) { checkNodeRef(ctx, rp + '.steps[' + i + ']', nodeIds, s); });
+      else ctx.errors.push(rp + '.steps 缺失或不是数组');
+    });
+  }
+
+  function validateCodePanel(ctx, p, g) {
+    if (!requireArr(ctx, p, g, 'versions')) return;
+    var ids = Object.create(null);
+    eachItem(ctx, p + '.versions', g.versions, function (vp, v) {
+      if (!isId(v.id)) ctx.errors.push(vp + '.id 缺失或为空');
+      else if (ids[v.id]) ctx.errors.push(vp + '.id 重复：' + v.id);
+      else ids[v.id] = true;
+      requireStr(ctx, vp, v, 'label');
+      requireStr(ctx, vp, v, 'code');
+      optionalStr(ctx, vp, v, 'language');
+      optionalStr(ctx, vp, v, 'note');
+      checkSpan(ctx, vp, v);
+    });
+  }
+
+  function validateTimeline(ctx, p, g) {
+    optionalStr(ctx, p, g, 'metricLabel');
+    if (g.better !== undefined) checkEnum(ctx, p + '.better', g.better, BETTER);
+    if (!requireArr(ctx, p, g, 'events')) return;
+    eachItem(ctx, p + '.events', g.events, function (ep, e) {
+      requireStr(ctx, ep, e, 'title');
+      optionalStr(ctx, ep, e, 'detail');
+      if (e.metric !== undefined) {
+        if (!isObj(e.metric) || typeof e.metric.value !== 'number' || !isFinite(e.metric.value) || !isStr(e.metric.unit)) {
+          ctx.errors.push(ep + '.metric 应为 { value: 数字, unit: 字符串 }');
+        }
+      }
+      // 事件没有 until：它一旦发生就一直在时间线上
+      if (!isStr(e.since)) ctx.errors.push(ep + '.since 缺失或不是字符串');
+      else lessonRef(ctx, ep + '.since', e.since);
+    });
+  }
+
+  var PANEL_CHECKS = { diagram: validateDiagram, code: validateCodePanel, timeline: validateTimeline };
+
+  function validateGrowth(ctx, d) {
+    if (!requireArr(ctx, 'growth', d, 'growth')) return;
+    eachItem(ctx, 'growth', d.growth, function (p, g) {
+      requireStr(ctx, p, g, 'title');
+      if (PANEL_KIND.indexOf(g.kind) < 0) { checkEnum(ctx, p + '.kind', g.kind, PANEL_KIND); return; }
+      PANEL_CHECKS[g.kind](ctx, p, g);
+    });
+  }
+
+  core.validateCourse = function validateCourse(data, opts) {
+    var ctx = { errors: [], warnings: [], lessonsToCheck: [], resourceIds: Object.create(null), lessonIndex: Object.create(null) };
+    var d = data;
+    if (!isObj(d)) return { errors: ['数据顶层应为对象'], warnings: [] };
+
+    if (d.version !== 1) ctx.errors.push('version 应为 1，实际是 ' + show(d.version));
+    if (!isId(d.topic)) ctx.errors.push('topic 缺失或为空');
+    if (!isId(d.slug)) ctx.errors.push('slug 缺失或为空');
+    else {
+      if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) ctx.warnings.push('slug 不是 kebab-case：' + d.slug);
+      var dirName = opts && opts.dirName;
+      if (isStr(dirName) && dirName !== d.slug) ctx.warnings.push('slug（' + d.slug + '）与目录名（' + dirName + '）不一致');
+    }
+    if (!(d.template === null || isStr(d.template))) ctx.errors.push('template 缺失，应为模板名或 null');
+    if (!isObj(d.mission)) ctx.errors.push('mission 缺失或不是对象');
+    else ['why', 'target', 'background'].forEach(function (k) { requireStr(ctx, 'mission', d.mission, k); });
+    requireStr(ctx, '', d, 'approach');
+    checkEnum(ctx, 'researched', d.researched, RESEARCHED);
+    optionalStr(ctx, '', d, 'notice');
+    optionalStr(ctx, '', d, 'updatedAt');
+
+    validateResources(ctx, d);
+    validateLessons(ctx, d);
+    validateLessonContent(ctx);
+
+    if (d.resume !== undefined) {
+      if (!isObj(d.resume)) ctx.errors.push('resume 应为对象');
+      else {
+        if (!isStr(d.resume.lesson)) ctx.errors.push('resume.lesson 缺失或不是字符串');
+        else if (ctx.lessonIndex[d.resume.lesson] === undefined) ctx.errors.push('resume.lesson 引用了不存在的课：' + show(d.resume.lesson));
+        requireStr(ctx, 'resume', d.resume, 'note');
+      }
+    }
+    if (requireArr(ctx, 'review', d, 'review')) {
+      eachItem(ctx, 'review', d.review, function (p, r) {
+        if (r.lesson !== null && !isStr(r.lesson)) ctx.errors.push(p + '.lesson 应为课程 id 或 null');
+        else if (r.lesson !== null && ctx.lessonIndex[r.lesson] === undefined) ctx.errors.push(p + '.lesson 引用了不存在的课：' + show(r.lesson));
+        requireStr(ctx, p, r, 'text');
+      });
+    }
+    validateGrowth(ctx, d);
+    return { errors: ctx.errors, warnings: ctx.warnings };
+  };
+
+  // ---- 进度 ----
+  // total 不含 skipped 的课；mastered 与 done 分开数
+  core.progressOf = function progressOf(data) {
+    var lessons = Array.isArray(data.lessons) ? data.lessons : [];
+    var p = { total: 0, done: 0, mastered: 0, skipped: 0, review: Array.isArray(data.review) ? data.review.length : 0 };
+    lessons.forEach(function (l) {
+      if (l.status === 'skipped') { p.skipped++; return; }
+      p.total++;
+      if (l.status === 'done') p.done++;
+      if (l.mastered === true) p.mastered++;
+    });
+    return p;
+  };
+
+  // ---- 来源标记 ----
+  core.sourceTag = function sourceTag(course, card) {
+    if (course.researched !== 'yes' || NO_SOURCE_TAG.indexOf(card.type) >= 0) return null;
+    if (!Array.isArray(card.refs) || card.refs.length === 0) return { kind: 'unverified' };
+    var resources = Array.isArray(course.resources) ? course.resources : [];
+    return {
+      kind: 'refs',
+      titles: card.refs.map(function (id) {
+        for (var i = 0; i < resources.length; i++) if (resources[i].id === id) return resources[i].title;
+        return id;
+      })
+    };
+  };
+
+  // ---- 文本 ----
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  // 先整体转义，再认行内代码和粗体；代码段里的 ** 不再当粗体
+  core.inline = function inline(text) {
+    var escaped = escapeHtml(String(text === undefined || text === null ? '' : text));
+    return escaped.split(/(`[^`\n]+`)/).map(function (part, i) {
+      if (i % 2 === 1) return '<code>' + part.slice(1, -1) + '</code>';
+      return part.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+    }).join('').replace(/\r?\n/g, '<br>');
+  };
+
+  window.CourseCore = core;
+})();
+</script>
+</body>
+</html>
