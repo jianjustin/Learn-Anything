@@ -1695,6 +1695,15 @@ Expected: 两个配置目录里都装上了 plugin。在桌面应用和命令行
 9. 发题时评分标准会不会通过文件编辑的 diff 或权限确认框显示在对话里（页面上已经隐藏）。看实际观感，由用户决定要不要改成别的落盘方式。
 10. `~/.claude-ccswitch` 用的是第三方网关和非 Anthropic 模型，令牌目前失效：plugin 装进这个配置目录后能否工作单独确认，评分子代理指定的 `sonnet` 在那边可能解析不了。
 
+**结果（2026-11-18）**
+
+- 第 1 项：是缓存里的拷贝，位置在 `<配置目录>/plugins/cache/learn-anything-local/learn-anything/0.1.0`。改了仓库之后要运行 `bash install.sh --reinstall`。
+- 第 2 项：必填配置项没填时 `plugin install` 也成功，随后 `configure` 把课程目录写入；目标目录当时已存在且为空。重复执行没有单独测。
+- 第 3、5、7 项：所有者在桌面应用的新会话里用 `/learn-anything:learn` 试过，报告「都正常」，没有给出逐项细节。第 7 项另有旁证：安装后的会话里可用的子代理类型列出了 `learn-anything:course-researcher` 和 `learn-anything:answer-grader`，skill 列表里有 `learn-anything:learn`。
+- 第 4 项：没有测（课程目录已经配置好，要测得先清掉配置）。脚本一侧有保护：建课和迁移脚本拒绝空路径、相对路径和没替换的占位符。
+- 第 6、8、9 项：留到验收时看（需要真实的课程读写、待回顾内容和发题）。
+- 第 10 项：没有测，网关令牌仍然失效。
+
 - [ ] **Step 3: 迁移两门课（先确认）**
 
 ```bash
@@ -1703,6 +1712,13 @@ node plugins/learn-anything/skills/learn/scripts/migrate-interview.mjs /Users/ch
 ```
 
 Expected: 两条命令都退出 0，各输出一行数量。打开 `/Users/chenjianrui/projects/index.html`，两门课都在；逐课翻看，和原来的课程页内容一致。源目录没有变化（`git -C /Users/chenjianrui/workspaces/skills/interview_sprint status --short` 的输出和迁移前相同）。
+
+**结果（2026-11-18）**
+
+- 两条命令都退出 0：billing-system `lessons=11 cards=58`，customer-service-agent `lessons=19 cards=170`。两份 `course-data.js` 校验都是 0 错误 0 警告。
+- 用无头 Chrome 打开真实目录核对：总览页两门课都在，没有加载失败；billing-system 显示 11/11，11 课共 58 张卡片全部显示；customer-service-agent 显示 10/19，打开停在断点 `session-state`，已开始的课共显示 160 张卡片，另有 10 张寄存在三门未开始的课里（`observability` 2、`rollout` 4、`pitch` 4），按设计讲到时才显示；「迁移来的备忘」卡片在 `session-state` 里可见。页面没有报错。
+- 旧仓库的 `git status --short` 迁移前后相同。
+- 没有迁移、仍留在旧目录的文件：billing-system 的 4 个 `.mmd`，customer-service-agent 的 `course-data.backup-20261111.js`。
 
 - [ ] **Step 4: 人工验收**
 
