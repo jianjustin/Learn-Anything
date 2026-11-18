@@ -4,10 +4,9 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { isSafeDir } from './course-index.mjs';
-import { MigrateError, isInside, loadOldCourse } from './migrate-common.mjs';
-
-const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const list = (v) => (Array.isArray(v) ? v : []);
+import {
+  MigrateError, isInside, isObj, list, loadOldCourse,
+} from './migrate-common.mjs';
 
 export const TABLE_MARK = { typemap: 'guokao-typemap', examgrid: 'guokao-examgrid' };
 
@@ -189,7 +188,7 @@ const lessonIds = (ref) => (Array.isArray(ref) ? ref : [ref]);
 
 // 按题库重算 templateData.growth：返回新的 growth，不改传入的对象。
 // 题型地图：count 取题库，lesson 以课程为准；题库有、课程没有的节点按 outline 补进来。
-// 真题覆盖：years、items 换成题库的，课程里已有的 demo 标记按 questionKey 保留（题库里没有或已是 hold 的题丢掉标记，列进 dropped）。
+// 真题覆盖：years、items 换成题库的（hold 题去掉 img），课程里已有的 demo 标记按 questionKey 保留（题库里没有或已是 hold 的题丢掉标记，列进 dropped）。
 // zhenti 为 null（题库没有这门课的真题清单）时 growth 原样返回。
 export function syncGrowth(course, zhenti, outline) {
   const growth = structuredClone(list(course.templateData?.growth));
@@ -214,8 +213,9 @@ export function syncGrowth(course, zhenti, outline) {
     if (typemap.nodes.some((n) => isObj(n) && n.id === bank.id)) continue;
     const spec = list(outline?.typemap?.nodes).find((n) => isObj(n) && n.id === bank.id);
     if (!spec) throw new MigrateError(`题库有新题型 ${bank.id}，但课程里没有，仓库大纲里也找不到它，补不进来`);
-    const missing = lessonIds(spec.lesson).filter((id) => !courseLessons.includes(id));
-    if (missing.length || spec.lesson === undefined) {
+    const ids = spec.lesson === undefined ? [] : lessonIds(spec.lesson);
+    const missing = ids.filter((id) => !courseLessons.includes(id));
+    if (!ids.length || missing.length) {
       throw new MigrateError(`新题型 ${bank.id} 对应的课 ${missing.join('、') || '（大纲没写）'} 不在课程里，补不进来`);
     }
     const node = { id: spec.id };
@@ -233,7 +233,10 @@ export function syncGrowth(course, zhenti, outline) {
   const bankKeys = new Set(items.map(questionKey));
   for (const key of demoKeys) if (!bankKeys.has(key) || holdKeys.has(key)) dropped.push(key);
   const newItems = items.map((it) => {
-    const { demo, ...rest } = it;
+    const { demo, ...kept } = it;
+    // hold 题的题图不进课程文件
+    const { img, ...noImg } = kept;
+    const rest = it.hold ? noImg : kept;
     return demoKeys.has(questionKey(it)) && !it.hold ? { ...rest, demo: true } : rest;
   });
   const examgrid = oldExamgrid ?? { kind: 'examgrid', title: '真题覆盖' };

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// 用法：node guokao.mjs sync <guokao_repo> <课程文件> [--demo <行标签-题号>]...
-// 国考模板（template 为 guokao 的课）自己的脚本。目前只有 sync：
+// 用法：
+//   node guokao.mjs sync <guokao_repo> <课程文件> [--demo <行标签-题号>]...
+//   node guokao.mjs image <guokao_repo> <课程文件> <课程 id> <行标签-题号> [--alt <描述>]
+// 国考模板（template 为 guokao 的课）自己的脚本，有 sync 和 image 两个子命令。
+//
+// sync：
 // 从题库（<guokao_repo>/guokao-sprint/references/，只读）同步课程的真题覆盖和题型地图：
 // 重算 templateData.growth（题型地图的 count、新增题型、真题覆盖的 years 和 items），再按它重写两张带 generated 标记的表格卡。
 // 只改这两处；课程里已有的 demo 标记按「行标签-题号」保留，题库里没有的题的标记丢掉并列出。
@@ -8,16 +12,24 @@
 // 先在内存里算好、校验，通过才写（临时文件 + 改名）；任何一步出错，课程文件都不动。
 // 成功时 stdout 一行 nodes=<题型数> items=<真题数> demo=<已示范数>；丢掉的标记、新增的题型和校验警告以 △ 开头写到 stderr，错误以 ✗ 开头。
 // 退出码：0 成功，1 出错（仓库路径不合法、课程文件读不了或不是 guokao 模板、题库补不进来、--demo 的题不行、校验有错误），2 参数不对。
+//
+// image：把题库里这道题的题图（examgrid 里该题的 img，内嵌成 data:image）做成一张 html 卡，标题「<行标签>-<题号> 题图」，
+// 插在课程 id 那一课最后一张 steps 卡之后，没有 steps 卡就追加到末尾；--alt 是图下的说明。
+// hold（留作整卷）题、没有 img 的题、题库里没有的题、课程 id 不存在都报错，课程文件不动。
+// 成功时 stdout 一行 inserted <课程 id> <行标签-题号>。退出码同上。
 import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
 import { readDataFile, writeDataFile } from './lib/data-file.mjs';
 import {
-  loadRepo, placeTables, questionKey, repoProblem, syncGrowth,
+  imageHtml, loadRepo, placeTables, questionKey, repoProblem, syncGrowth,
 } from './lib/guokao.mjs';
 import { MigrateError, isObj, list, requireValid } from './lib/migrate-common.mjs';
 
-const USAGE = '用法：node guokao.mjs sync <guokao_repo> <课程文件> [--demo <行标签-题号>]...';
+const USAGE = [
+  '用法：node guokao.mjs sync <guokao_repo> <课程文件> [--demo <行标签-题号>]...',
+  '      node guokao.mjs image <guokao_repo> <课程文件> <课程 id> <行标签-题号> [--alt <描述>]',
+].join('\n');
 
 // 返回 { repo, file, demos }；参数不对返回 null
 export function parseSyncArgs(args) {
@@ -58,13 +70,8 @@ export function syncCourse(course, repo, demos = []) {
   return { out, dropped, added, summary };
 }
 
-function sync(args) {
-  const parsed = parseSyncArgs(args);
-  if (!parsed) {
-    console.error(USAGE);
-    return 2;
-  }
-  const { repo, file, demos } = parsed;
+// 读 guokao 课程文件：路径不存在、读不了、不是 guokao 模板都抛 MigrateError
+function readGuokaoCourse(repo, file, what) {
   const problem = repoProblem(repo);
   if (problem) throw new MigrateError(problem);
   if (!existsSync(file)) throw new MigrateError(`找不到课程文件：${file}`);
@@ -74,13 +81,29 @@ function sync(args) {
   } catch (e) {
     throw new MigrateError(`无法读取课程文件 ${file}：${e.message}`);
   }
-  const { out, dropped, added, summary } = syncCourse(course, loadRepo(repo), demos);
-  const warnings = requireValid(loadCourseCore(), out);
+  if (course.template !== 'guokao') throw new MigrateError(`课程的 template 是 ${JSON.stringify(course.template)}，不是 guokao，不能用 guokao.mjs ${what}`);
+  return course;
+}
+
+function writeOut(file, out) {
   try {
     writeDataFile(file, 'LEARN_COURSE', out);
   } catch (e) {
     throw new MigrateError(`写入失败：${e.message}`);
   }
+}
+
+function sync(args) {
+  const parsed = parseSyncArgs(args);
+  if (!parsed) {
+    console.error(USAGE);
+    return 2;
+  }
+  const { repo, file, demos } = parsed;
+  const course = readGuokaoCourse(repo, file, '同步');
+  const { out, dropped, added, summary } = syncCourse(course, loadRepo(repo), demos);
+  const warnings = requireValid(loadCourseCore(), out);
+  writeOut(file, out);
   if (dropped.length) console.error(`△ 题库里没有或已改为留作整卷，示范标记已丢掉：${dropped.join('、')}`);
   if (added.length) console.error(`△ 从仓库大纲补进的新题型：${added.join('、')}`);
   for (const w of warnings) console.error(`△ ${w}`);
@@ -88,13 +111,77 @@ function sync(args) {
   return 0;
 }
 
+// 返回 { repo, file, lesson, key, alt }；参数不对返回 null
+export function parseImageArgs(args) {
+  const positional = [];
+  let alt;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--alt') {
+      const v = args[i + 1];
+      if (v === undefined || alt !== undefined) return null;
+      alt = v;
+      i += 1;
+    } else if (args[i].startsWith('--')) return null;
+    else positional.push(args[i]);
+  }
+  if (positional.length !== 4) return null;
+  return {
+    repo: positional[0], file: positional[1], lesson: positional[2], key: positional[3], alt,
+  };
+}
+
+// 在内存里算出插入题图卡后的课程：不写盘。题图的字节从题库读（readImage），课程里的 examgrid 不参与
+export function insertImage(course, repo, lessonId, key, alt) {
+  const lessons = list(course.lessons);
+  const at = lessons.findIndex((l) => isObj(l) && l.id === lessonId);
+  if (at < 0) throw new MigrateError(`课程里没有 id 为 ${lessonId} 的课`);
+  const zhenti = repo.zhenti(course.slug);
+  const item = list(zhenti?.items).find((x) => isObj(x) && questionKey(x) === key);
+  if (!item) throw new MigrateError(`${key}：题库里没有这道题`);
+  if (item.hold) throw new MigrateError(`${key}：这道题留作整卷（hold），题图不能放进课程`);
+  if (typeof item.img !== 'string' || item.img === '') throw new MigrateError(`${key}：这道题在题库里没有题图`);
+  let html;
+  try {
+    html = imageHtml(item.img, alt, repo.readImage(item.img));
+  } catch (e) {
+    if (e instanceof MigrateError) throw e;
+    throw new MigrateError(`${key}：${e.message}`);
+  }
+  const card = { type: 'html', title: `${key} 题图`, html };
+  const cards = list(lessons[at].cards).slice();
+  const lastSteps = cards.map((c) => isObj(c) && c.type === 'steps').lastIndexOf(true);
+  cards.splice(lastSteps >= 0 ? lastSteps + 1 : cards.length, 0, card);
+  const newLessons = lessons.slice();
+  newLessons[at] = { ...lessons[at], cards };
+  return { ...course, lessons: newLessons };
+}
+
+function image(args) {
+  const parsed = parseImageArgs(args);
+  if (!parsed) {
+    console.error(USAGE);
+    return 2;
+  }
+  const {
+    repo, file, lesson, key, alt,
+  } = parsed;
+  const course = readGuokaoCourse(repo, file, 'image');
+  const out = insertImage(course, loadRepo(repo), lesson, key, alt);
+  const warnings = requireValid(loadCourseCore(), out);
+  writeOut(file, out);
+  for (const w of warnings) console.error(`△ ${w}`);
+  console.log(`inserted ${lesson} ${key}`);
+  return 0;
+}
+
 function main(args) {
-  if (args[0] !== 'sync') {
+  const commands = { sync, image };
+  if (!Object.hasOwn(commands, args[0] ?? '')) {
     console.error(USAGE);
     return 2;
   }
   try {
-    return sync(args.slice(1));
+    return commands[args[0]](args.slice(1));
   } catch (e) {
     if (!(e instanceof MigrateError)) throw e;
     console.error(`✗ ${e.message}`);

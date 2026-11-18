@@ -272,3 +272,96 @@ test('syncGrowth：题库里已改成 hold 的题，demo 标记也丢掉；课�
   assert.equal(built.growth[0].nodes.length, 4);
   assert.throws(() => lib.syncGrowth(course, repo.zhenti('xingce-shuliang'), { typemap: { nodes: [] } }), MigrateError);
 });
+
+test('syncGrowth：hold 题带 img 时，写进课程前去掉 img', () => {
+  const file = makeCourse();
+  const repo = bankCopy();
+  const zhenti = path.join(refsOf(repo), 'zhenti/xingce-shuliang.data.js');
+  writeFileSync(zhenti, readFileSync(zhenti, 'utf8').replace('"hold": true }', '"hold": true, "img": "img/2024-70.png" }'));
+  assert.ok(lib.loadRepo(repo).zhenti('xingce-shuliang').items.some((i) => i.hold && i.img), '夹具应有带 img 的 hold 题');
+  const r = run('sync', repo, file);
+  assert.equal(r.status, 0, r.stderr);
+  const items = read(file).templateData.growth[1].items;
+  assert.ok(items.filter((i) => i.hold).length >= 2);
+  for (const it of items.filter((i) => i.hold)) assert.equal(Object.hasOwn(it, 'img'), false, `${it.year}-${it.no}`);
+  assert.equal(items.find((i) => i.no === 70).img, 'img/2024-70.png');
+});
+
+test('syncGrowth：新节点的 lesson 为空数组时拒绝，课程文件不变', () => {
+  const file = makeCourse();
+  const repo = bankCopy();
+  const outlines = path.join(refsOf(repo), 'outlines.data.js');
+  writeFileSync(outlines, readFileSync(outlines, 'utf8').replace('methods: "利润 = 售价 - 成本", lesson: "celve"', 'methods: "利润 = 售价 - 成本", lesson: []'));
+  const before = hash(file);
+  const r = run('sync', repo, file);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /jingji/);
+  assert.equal(hash(file), before);
+});
+
+const lessonOf = (course, id) => course.lessons.find((l) => l.id === id);
+
+test('image：插在最后一张 steps 卡之后，图片内嵌', () => {
+  const file = makeCourse();
+  const course = read(file);
+  const lesson = lessonOf(course, 'fangcheng');
+  const lastSteps = lesson.cards.map((c) => c.type).lastIndexOf('steps');
+  assert.ok(lastSteps >= 0 && lastSteps < lesson.cards.length - 1, '夹具里 steps 卡后面应还有别的卡');
+  const r = run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt', '图中 <三角形> & "边"');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'inserted fangcheng 2024-70');
+  const after = read(file);
+  const cards = lessonOf(after, 'fangcheng').cards;
+  assert.equal(cards.length, lesson.cards.length + 1);
+  const card = cards[lastSteps + 1];
+  assert.equal(card.type, 'html');
+  assert.equal(card.title, '2024-70 题图');
+  assert.match(card.html, /data:image\/png;base64,/);
+  assert.ok(card.html.includes('图中 &lt;三角形&gt; &amp; &quot;边&quot;'), card.html);
+  assert.deepEqual(cards.slice(0, lastSteps + 1), lesson.cards.slice(0, lastSteps + 1));
+  assert.deepEqual(cards.slice(lastSteps + 2), lesson.cards.slice(lastSteps + 1));
+  assert.deepEqual(plain(C.validateCourse(after, { dirName: after.slug }).errors), []);
+});
+
+test('image：没有 steps 卡时追加到末尾', () => {
+  const file = makeCourse();
+  const course = read(file);
+  const lesson = lessonOf(course, 'fangcheng');
+  lesson.cards = lesson.cards.filter((c) => c.type !== 'steps');
+  writeFileSync(file, `window.LEARN_COURSE = ${JSON.stringify(course, null, 2)};\n`);
+  const n = lesson.cards.length;
+  const r = run('image', bankRoot, file, 'fangcheng', '2024-70');
+  assert.equal(r.status, 0, r.stderr);
+  const cards = lessonOf(read(file), 'fangcheng').cards;
+  assert.equal(cards.length, n + 1);
+  assert.equal(cards.at(-1).title, '2024-70 题图');
+  assert.match(cards.at(-1).html, /data:image\/png;base64,/);
+});
+
+test('image：hold 题、没有题图的题、题库里没有的题拒绝，文件不变', () => {
+  const file = makeCourse();
+  const before = hash(file);
+  const hold = bankCopy();
+  const zhenti = path.join(refsOf(hold), 'zhenti/xingce-shuliang.data.js');
+  writeFileSync(zhenti, readFileSync(zhenti, 'utf8').replace('"no": 72, "type": "rongchi", "hold": true', '"no": 72, "type": "rongchi", "hold": true, "img": "img/2024-70.png"'));
+  for (const [repo, key] of [[hold, '2025地市-72'], [bankRoot, '2024-63'], [bankRoot, '2025地市-68'], [bankRoot, '2099-1']]) {
+    const r = run('image', repo, file, 'fangcheng', key);
+    assert.equal(r.status, 1, key);
+    assert.match(r.stderr, /^✗/m, key);
+    assert.equal(hash(file), before, key);
+  }
+  assert.match(run('image', hold, file, 'fangcheng', '2025地市-72').stderr, /留作整卷|hold/);
+  assert.match(run('image', bankRoot, file, 'fangcheng', '2024-63').stderr, /没有题图/);
+});
+
+test('image：课程 id 不存在时退出 1；参数不对退出 2', () => {
+  const file = makeCourse();
+  const before = hash(file);
+  const r = run('image', bankRoot, file, 'nosuch', '2024-70');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^✗.*nosuch/m);
+  assert.equal(hash(file), before);
+  assert.equal(run('image', bankRoot, file, 'fangcheng').status, 2);
+  assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt').status, 2);
+  assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--nope').status, 2);
+});
