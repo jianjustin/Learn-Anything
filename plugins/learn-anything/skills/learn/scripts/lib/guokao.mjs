@@ -11,6 +11,12 @@ import {
 export const TABLE_MARK = { typemap: 'guokao-typemap', examgrid: 'guokao-examgrid' };
 
 export const SERIES_NAME = '国考';
+
+// 课程的 approach：新建的课只写 APPROACH；从 guokao-sprint 迁移来的课在后面接 MIGRATED_NOTE。migrate-guokao.mjs 和 guokao.mjs new 共用
+export const APPROACH = '先讲考情与题型地图，再逐类讲识别线索、解法和有出处的真题示范，然后用原创变式检验，最后讲做与跳的限时策略。';
+export const MIGRATED_NOTE = '本课由 guokao-sprint 的课程迁移而来。';
+// templateData.from：这门课怎么来的
+export const FROM = { migrated: 'guokao-sprint', outline: 'guokao-outline' };
 // guokao-sprint 建课清单的顺序
 export const SERIES_ORDER = [
   'xingce-zhengzhi', 'xingce-changshi', 'xingce-yanyu', 'xingce-shuliang', 'xingce-panduan', 'xingce-ziliao',
@@ -154,14 +160,14 @@ export function loadRepo(repo) {
     refs,
     outline(slug) {
       if (!slugOk(slug)) throw new MigrateError(`课程的 slug 不合法：${JSON.stringify(slug)}`);
-      outlines ??= loadOldCourse(path.join(refs, 'outlines.data.js'), 'GUOKAO_OUTLINES');
+      outlines ??= loadOldCourse(path.join(refs, 'outlines.data.js'), 'GUOKAO_OUTLINES', '题库文件');
       return Object.hasOwn(outlines, slug) && isObj(outlines[slug]) ? outlines[slug] : null;
     },
     zhenti(slug) {
       if (!slugOk(slug)) throw new MigrateError(`课程的 slug 不合法：${JSON.stringify(slug)}`);
       const file = path.join(refs, 'zhenti', `${slug}.data.js`);
       if (!existsSync(file)) return null;
-      const z = loadOldCourse(file, 'GUOKAO_ZHENTI');
+      const z = loadOldCourse(file, 'GUOKAO_ZHENTI', '题库文件');
       if (z.module !== undefined && z.module !== slug) throw new MigrateError(`${file} 的 module 是 ${JSON.stringify(z.module)}，与 ${slug} 不符`);
       return z;
     },

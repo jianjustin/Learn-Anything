@@ -10,6 +10,7 @@ import { loadCore, plain } from '../helpers/load-core.mjs';
 
 const script = path.join(SCRIPTS_DIR, 'guokao.mjs');
 const { migrateCourse } = await import(path.join(SCRIPTS_DIR, 'migrate-guokao.mjs'));
+const { APPROACH } = await import(path.join(SCRIPTS_DIR, 'lib/guokao.mjs'));
 const { readDataFile } = await import(path.join(SCRIPTS_DIR, 'lib/data-file.mjs'));
 const lib = await import(path.join(SCRIPTS_DIR, 'lib/guokao.mjs'));
 const { MigrateError } = await import(path.join(SCRIPTS_DIR, 'lib/migrate-common.mjs'));
@@ -174,6 +175,50 @@ test('题库的新题型在仓库大纲里找不到时拒绝，课程文件不�
   assert.equal(r.status, 1);
   assert.match(r.stderr, /jingji/);
   assert.equal(hash(file), before);
+});
+
+test('题库里有题型不在题型地图、或年份不在 years 的题时，sync 和 new 都只打一行 ✗ 退出 1，不打堆栈，课程文件不动', () => {
+  const edits = {
+    '题型不是节点': (z) => z.replace('"type": "jingji" }', '"type": "nope" }'),
+    '年份不在 years 里': (z) => z.replace('{ "year": "2024", "no": 79,', '{ "year": "2030", "no": 79,'),
+  };
+  for (const [name, edit] of Object.entries(edits)) {
+    const repo = bankCopy();
+    const zf = path.join(refsOf(repo), 'zhenti/xingce-shuliang.data.js');
+    const text = readFileSync(zf, 'utf8');
+    const changed = edit(text);
+    assert.notEqual(changed, text, name);
+    writeFileSync(zf, changed);
+    const file = makeCourse();
+    const before = hash(file);
+    const r = run('sync', repo, file);
+    assert.equal(r.status, 1, `${name}：${r.stderr}`);
+    assert.match(r.stderr, /^✗ /m, name);
+    assert.doesNotMatch(r.stderr, /\n\s+at |Error:/, `${name}：不该有堆栈`);
+    assert.equal(r.stderr.trim().split('\n').length, 1, `${name}：${r.stderr}`);
+    assert.equal(hash(file), before, name);
+    const home = tmp();
+    const n = run('new', repo, home, 'xingce-shuliang');
+    assert.equal(n.status, 1, `${name}：${n.stderr}`);
+    assert.match(n.stderr, /^✗ /m, name);
+    assert.doesNotMatch(n.stderr, /\n\s+at |Error:/, name);
+    assert.ok(!existsSync(path.join(home, 'xingce-shuliang')), name);
+  }
+});
+
+test('题库文件读不了时，报「无法读取题库文件」，不是「旧课程文件」', () => {
+  const file = makeCourse();
+  const repo = bankCopy();
+  writeFileSync(path.join(refsOf(repo), 'zhenti/xingce-shuliang.data.js'), 'window.GUOKAO_ZHENTI = ;\n');
+  const r = run('sync', repo, file);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^✗ 无法读取题库文件 /m);
+  assert.doesNotMatch(r.stderr, /旧课程文件/);
+  const repo2 = bankCopy();
+  writeFileSync(path.join(refsOf(repo2), 'outlines.data.js'), 'window.GUOKAO_OUTLINES = ;\n');
+  const n = run('new', repo2, tmp(), SLUG);
+  assert.equal(n.status, 1);
+  assert.match(n.stderr, /^✗ 无法读取题库文件 /m);
 });
 
 test('template 不是 guokao 时退出 1；缺参数、未知参数退出 2', () => {
@@ -410,6 +455,9 @@ test('new：按大纲建课，全部 todo，带系列和两张表格卡，已登
   assert.deepEqual(course.lessons.map((l) => l.cards.length), [2, 0, 0]);
   assert.deepEqual(course.lessons[0].cards.map((c) => c.generated), [lib.TABLE_MARK.typemap, lib.TABLE_MARK.examgrid]);
   assert.deepEqual(course.review, []);
+  assert.equal(course.templateData.from, 'guokao-outline');
+  assert.ok(course.approach.length > 0 && !course.approach.includes('迁移'), course.approach);
+  assert.equal(course.approach, APPROACH);
   assert.match(course.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/);
   // 题型地图的 count 取题库，真题覆盖是题库的
   const [typemap, examgrid] = course.templateData.growth;

@@ -21,7 +21,7 @@
 // 成功时 stdout 一行 inserted <课程 id> <行标签-题号>。退出码同上。
 //
 // new：按题库仓库的默认大纲建一门国考课（slug 须是大纲里有的，如 xingce-shuliang）：课程全部 todo、cards 为空，
-// 题型地图的 count 取题库，有真题清单就带真题覆盖；转成新格式（考情课末尾两张表格卡、系列「国考」）后登记进 courses_dir 的 index-data.js。
+// 题型地图的 count 取题库，有真题清单就带真题覆盖；转成新格式（考情课末尾两张表格卡、系列「国考」，templateData.from 为 guokao-outline）后登记进 courses_dir 的 index-data.js。
 // slug 不在大纲里、课程目录已存在、路径不合法、校验有错误都不建任何东西，退出 1；成功时 stdout 只有课程页（course.html）的绝对路径。
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -35,7 +35,7 @@ import {
 import {
   MigrateError, isObj, list, requireValid, writeMigrated,
 } from './lib/migrate-common.mjs';
-import { APPROACH, convertCourse } from './migrate-guokao.mjs';
+import { convertCourse } from './migrate-guokao.mjs';
 
 const USAGE = [
   '用法：node guokao.mjs sync <guokao_repo> <课程文件> [--demo <行标签-题号>]...',
@@ -72,7 +72,13 @@ export function syncCourse(course, repo, demos = []) {
     if (it.hold) throw new MigrateError(`--demo ${key}：这道题留作整卷，不能做示范`);
     it.demo = true;
   }
-  const out = placeTables({ ...course, templateData: { ...course.templateData, growth } });
+  let out;
+  try {
+    out = placeTables({ ...course, templateData: { ...course.templateData, growth } });
+  } catch (e) {
+    // 题库数据对不上（题型不在题型地图、年份不在 years 里）：报成一行 ✗，不打堆栈
+    throw new MigrateError(`无法重写表格卡：${e.message}`);
+  }
   const typemap = growth.find((g) => isObj(g) && g.kind === 'typemap');
   const summary = {
     nodes: list(typemap?.nodes).length,
@@ -206,8 +212,7 @@ export function newCourse(repo, slug) {
   const noImage = () => {
     throw new MigrateError('初始课程不应该有题图');
   };
-  const out = convertCourse(initial, noImage);
-  out.approach = APPROACH.replace('本课由 guokao-sprint 的课程迁移而来。', '');
+  const out = convertCourse(initial, noImage, { migrated: false });
   const warnings = requireValid(loadCourseCore(), out);
   return { out, bank, warnings };
 }

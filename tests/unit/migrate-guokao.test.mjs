@@ -9,7 +9,8 @@ import { ROOT, SCRIPTS_DIR } from '../helpers/paths.mjs';
 import { loadCore, plain } from '../helpers/load-core.mjs';
 
 const script = path.join(SCRIPTS_DIR, 'migrate-guokao.mjs');
-const { loadOldCourse, convertCourse, migrateCourse, MigrateError, APPROACH } = await import(script);
+const { loadOldCourse, convertCourse, migrateCourse, MigrateError } = await import(script);
+const { APPROACH, MIGRATED_NOTE } = await import(path.join(SCRIPTS_DIR, 'lib/guokao.mjs'));
 const { readDataFile } = await import(path.join(SCRIPTS_DIR, 'lib/data-file.mjs'));
 const oldDir = path.join(ROOT, 'tests/fixtures/old-guokao');
 const oldFile = path.join(oldDir, 'course-data.js');
@@ -37,10 +38,25 @@ test('顶层字段和顺序', () => {
   assert.deepEqual(out.mission, {
     why: '准备国考行测的数量关系', target: '做好副省级卷第 66–80 题，共 15 题，限时约 10 分钟', background: '',
   });
-  assert.equal(out.approach, APPROACH);
+  assert.equal(out.approach, APPROACH + MIGRATED_NOTE);
+  assert.ok(out.approach.includes('迁移') && !APPROACH.includes('迁移'));
   assert.deepEqual([out.researched, out.resources, out.growth], ['skipped', [], []]);
   assert.deepEqual(out.series, { name: '国考', order: 4 });
   assert.deepEqual([out.updatedAt, out.resume], [old.updatedAt, old.resume]);
+});
+
+test('旧面板里 hold 题带 img 时，写进 templateData.growth 前去掉；非 hold 题保留', () => {
+  const o = structuredClone(old);
+  const items = o.growth.find((g) => g.kind === 'examgrid').items;
+  items.find((it) => it.hold).img = 'img/2025-68.png';
+  const r = convertCourse(o, readImage);
+  const got = r.templateData.growth.find((g) => g.kind === 'examgrid').items;
+  assert.ok(!('img' in got.find((it) => it.hold)));
+  assert.equal(got.find((it) => it.no === 70).img, 'img/2024-70.png');
+  assert.ok(!JSON.stringify(r).includes('2025-68.png'));
+  // 传入的旧课程不被改动
+  assert.equal(items.find((it) => it.hold).img, 'img/2025-68.png');
+  assert.deepEqual(plain(C.validateCourse(r, { dirName: 'xingce-shuliang' }).errors), []);
 });
 
 test('mission：非行测科目、没有 exam 时 target 为空；不在九门课清单里的 slug 没有 order', () => {
@@ -90,6 +106,29 @@ test('掌握按原练习记录推出', () => {
   assert.equal(withItems([{ q: 'a', yours: 'x', ok: false }, { q: 'b', yours: 'y', ok: true }, { q: 'c' }]), true);
   assert.equal(withItems([{ q: 'a' }, { q: 'b', yours: '跳过' }]), false);
   assert.equal(withItems([]), false);
+});
+
+test('待回顾指向的课不算掌握：练习推得出 mastered 但有待回顾条目挂在这课时，mastered 为 false', () => {
+  const make = (review) => {
+    const o = structuredClone(old);
+    o.lessons[1].status = 'done'; // fangcheng
+    o.lessons[1].cards = [{ type: 'practice', items: [{ q: 'a', yours: 'x', ok: false }, { q: 'b', yours: 'y', ok: true }] }];
+    o.review = review;
+    const r = convertCourse(o, readImage);
+    return { lesson: r.lessons[1], r };
+  };
+  // 对照：没有待回顾指向它时按练习推出 true
+  assert.equal(make(['没有课号的一条']).lesson.mastered, true);
+  // 「第 2 课…」挂到 fangcheng，不能同时是 mastered
+  const { lesson: l, r } = make(['第 2 课变式 1：答案对，但等量关系列错']);
+  assert.equal(l.mastered, false);
+  // 不变量：没有待回顾条目指向已掌握的课
+  for (const e of r.review) assert.ok(!r.lessons.some((x) => x.id === e.lesson && x.mastered), `${e.lesson} 已掌握却有待回顾`);
+  assert.deepEqual(plain(C.validateCourse(r, { dirName: 'xingce-shuliang' }).errors), []);
+  // 考情课也一样
+  const o = structuredClone(old);
+  o.review = ['第 1 课：x'];
+  assert.equal(convertCourse(o, readImage).lessons[0].mastered, false);
 });
 
 test('题型地图转成表格卡，放在考情课末尾', () => {

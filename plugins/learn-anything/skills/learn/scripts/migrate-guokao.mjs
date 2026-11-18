@@ -7,7 +7,8 @@
 // 退出码：0 成功，1 课程目录不合法、读不了源文件或题图、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
 //
 // 转换规则：
-// - 顶层：template 为 guokao；subject、exam 和原来的两个面板原样放进 templateData；series 统一为「国考」，order 按 guokao-sprint 的九门课顺序；
+// - 顶层：template 为 guokao；templateData.from 为 guokao-sprint（guokao.mjs new 新建的课是 guokao-outline）；
+//   subject、exam 和原来的两个面板放进 templateData（面板里 hold 题的 img 去掉，其余原样）；series 统一为「国考」，order 按 guokao-sprint 的九门课顺序；
 //   mission 按科目和 exam 写出，approach 写 guokao-sprint 的上法，researched 为 "skipped"，resources 为空。
 // - 面板：typemap（题型地图）和 examgrid（真题覆盖）在新格式里没有对应的面板，各转成一张表格卡，放在考情课（id 为 kaoqing，
 //   没有时第一课）的末尾；growth 为空。两张表格卡带 generated 标记（guokao-typemap、guokao-examgrid），模板之后靠标记原地重写。
@@ -15,7 +16,7 @@
 // - practice 条目：basedOn 接在题目后面；timeMin 接在回答后面；cause 译成中文放在 why 前面；yours 为「跳过」的记为 skipped: true，
 //   跳题依据写进 why。
 // - 课程：补 readings: []；mastered 按旧练习记录推出：讲完（done）的考情课为 true，其余 done 的课看练习里最后一条判过对错的 ok，
-//   没讲完的为 false。
+//   没讲完的为 false；待回顾转换之后，凡是有待回顾条目挂在这一课上的，mastered 一律改为 false（待回顾不能指向已掌握的课）。
 // - review：旧的待回顾是没过关的问题，迁成待回顾条目；条目以「第 N 课」开头时挂到第 N 课，否则 lesson 为 null。
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
 import { coursesDirProblem, isSafeDir } from './lib/course-index.mjs';
 import {
-  SERIES_NAME, SERIES_ORDER, imageHtml, inferMastered, placeTables, tableLessonIndex,
+  APPROACH, FROM, MIGRATED_NOTE, SERIES_NAME, SERIES_ORDER, imageHtml, inferMastered, placeTables, tableLessonIndex,
 } from './lib/guokao.mjs';
 import {
   MigrateError, countsOf, isInside, isObj, list, loadOldCourse as loadWith, requireValid, shapeOf, summaryLine, writeMigrated,
@@ -41,8 +42,6 @@ const CAUSE = {
   concept: '概念不清', reading: '审题', method: '方法', calculation: '计算', condition: '条件用错', time: '时间', unknown: '不明',
 };
 const IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
-export const APPROACH = '先讲考情与题型地图，再逐类讲识别线索、解法和有出处的真题示范，然后用原创变式检验，最后讲做与跳的限时策略。'
-  + '本课由 guokao-sprint 的课程迁移而来。';
 
 const OLD_TOP = ['version', 'topic', 'slug', 'subject', 'exam', 'updatedAt', 'resume', 'review', 'growth', 'lessons'];
 const GENERATED_TOP = ['template', 'templateData', 'mission', 'approach', 'researched', 'resources', 'notice', 'series'];
@@ -151,7 +150,8 @@ export function convertReview(review, lessons) {
 
 // 旧格式 → 新格式。不修改传入的对象。readImage(src) 读课程目录里的题图，返回 Buffer。
 // 规则没提到的字段（未知的顶层字段、卡片类型、卡片/课程/条目字段）原样带过去。
-export function convertCourse(old, readImage) {
+// migrated 为 false 时是 guokao.mjs new 按仓库大纲新建的课：templateData.from 为 guokao-outline，approach 不写迁移说明。
+export function convertCourse(old, readImage, { migrated = true } = {}) {
   if (!isObj(old)) throw CONVERT_ERR('旧课程不是对象');
   let o;
   try {
@@ -170,6 +170,16 @@ export function convertCourse(old, readImage) {
   panels.forEach((g, i) => {
     if (!isObj(g) || !['typemap', 'examgrid'].includes(g.kind)) throw CONVERT_ERR(`growth[${i}] 不是 typemap 或 examgrid`);
   });
+  // hold（留作整卷）题的题图不进课程文件，和 sync、新建课一样
+  for (const g of panels) {
+    if (g.kind === 'examgrid' && Array.isArray(g.items)) {
+      g.items = g.items.map((it) => {
+        if (!isObj(it) || !it.hold) return it;
+        const { img, ...rest } = it;
+        return rest;
+      });
+    }
+  }
   const typemap = panels.find((g) => g.kind === 'typemap');
   const examgrid = panels.find((g) => g.kind === 'examgrid');
   if (examgrid && !typemap) throw CONVERT_ERR('有真题覆盖但没有题型地图');
@@ -177,11 +187,11 @@ export function convertCourse(old, readImage) {
   const out = {};
   for (const k of ['version', 'topic', 'slug']) if (k in o) out[k] = o[k];
   out.template = 'guokao';
-  out.templateData = { from: 'guokao-sprint', subject: o.subject };
+  out.templateData = { from: migrated ? FROM.migrated : FROM.outline, subject: o.subject };
   if ('exam' in o) out.templateData.exam = o.exam;
   if (panels.length) out.templateData.growth = panels;
   out.mission = missionOf(o);
-  out.approach = APPROACH;
+  out.approach = migrated ? APPROACH + MIGRATED_NOTE : APPROACH;
   out.researched = 'skipped';
   out.resources = [];
   const order = SERIES_ORDER.indexOf(o.slug);
@@ -189,6 +199,8 @@ export function convertCourse(old, readImage) {
   for (const k of ['updatedAt', 'resume']) if (k in o) out[k] = o[k];
   out.lessons = o.lessons.map((l, i) => convertLesson(l, i, readImage));
   out.review = convertReview(list(o.review), out.lessons);
+  // learn 的不变量：待回顾不能指向已掌握的课，有条目挂在这课上就不算掌握
+  for (const l of out.lessons) if (isObj(l) && out.review.some((r) => r.lesson === l.id)) l.mastered = false;
   out.growth = [];
   // 字段顺序与 data-format.md 第 3 节一致：review、growth 在 lessons 前面
   const { lessons, ...rest } = out;

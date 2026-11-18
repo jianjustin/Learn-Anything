@@ -27,7 +27,8 @@ const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'old-cour
 const HARD_LIMIT_MS = 5000;
 const MAX_OUTPUT = 64 * 1024 * 1024;
 
-export function loadOldCourse(file, globalName) {
+// what：读的是什么文件，出错信息里用（旧课程文件、题库文件）
+export function loadOldCourse(file, globalName, what = '旧课程文件') {
   const abs = path.resolve(file);
   const r = spawnSync(process.execPath, [WORKER, abs, globalName], {
     encoding: 'utf8',
@@ -35,7 +36,7 @@ export function loadOldCourse(file, globalName) {
     killSignal: 'SIGKILL',
     maxBuffer: MAX_OUTPUT,
   });
-  const why = (reason) => new MigrateError(`无法读取旧课程文件 ${abs}：${reason}`);
+  const why = (reason) => new MigrateError(`无法读取${what} ${abs}：${reason}`);
   if (r.error) {
     throw why(r.error.code === 'ETIMEDOUT' ? `执行超过 ${HARD_LIMIT_MS / 1000} 秒，已终止` : `无法运行读取进程（${r.error.code || r.error.message}）`);
   }
