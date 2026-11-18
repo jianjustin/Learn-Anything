@@ -11,6 +11,12 @@
       "title": "课程目录",
       "description": "存放所有课程数据与课程页的目录，每门课一个子目录。",
       "required": true
+    },
+    "guokao_repo": {
+      "type": "directory",
+      "title": "国考题库仓库",
+      "description": "国考题库所在的仓库目录（只读它的 guokao-sprint/references/）；不学国考可以不配。",
+      "required": false
     }
   }
 }

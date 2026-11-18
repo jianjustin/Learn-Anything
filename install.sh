@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# learn-anything 的安装脚本：对每个 Claude Code 配置目录添加本地 marketplace、安装 plugin，并按需配置课程目录。
+# learn-anything 的安装脚本：对每个 Claude Code 配置目录添加本地 marketplace、安装 plugin，并按需配置课程目录和国考题库仓库。
 # 兼容 macOS 自带的 bash 3.2：不用关联数组、mapfile、${var,,}。
 #
-# 用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]
+# 用法：bash install.sh [--courses-dir <绝对路径>] [--guokao-repo <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]
 #   --courses-dir <绝对路径>  安装后把 plugin 的 courses_dir 配置为这个目录（安装时才有意义）
+#   --guokao-repo <绝对路径>  安装后把 plugin 的 guokao_repo 配置为国考题库仓库的目录（可选，安装时才有意义）
 #   --config-dir <目录>       只处理给出的配置目录，可重复；不给时处理默认目录、~/.claude-ccswitch（存在时）、
 #                             以及环境变量 CLAUDE_CONFIG_DIR 指向的目录（已设置且不同于前两者时）。
 #                             目录不存在时打印一行提示，照常继续
@@ -12,9 +13,13 @@
 #   --uninstall               卸载 plugin 并移除 marketplace（不动课程目录里的任何文件）；不能与 --reinstall 同用
 #   --dry-run                 只打印命令（每条一行，以 "+ " 开头），不执行
 #
+# configure 的语义（2026-11-18 在 Claude Code 2.1.318 上实测）：在临时配置目录里装好 plugin，先 configure {"courses_dir":"/tmp/a"}，
+# 再 configure {"guokao_repo":"/tmp/b"}，settings.json 的 pluginConfigs 里两个键都在：configure 按键合并，不会清掉没给的项。
+# 所以只给 --courses-dir 或只给 --guokao-repo 都安全，不需要「两项一起给」的提示。
+#
 # 默认配置目录（~/.claude）的命令不加前缀；其他目录的命令加 CLAUDE_CONFIG_DIR=<目录> 前缀。
 # 重复运行是安全的：每个目录先用 claude plugin marketplace list --json 和 claude plugin list --json（只读）查看现状，
-# marketplace 已添加就不再添加，plugin 已安装就不再安装；给了 --courses-dir 时 configure 总会执行。
+# marketplace 已添加就不再添加，plugin 已安装就不再安装；给了 --courses-dir 或 --guokao-repo 时 configure 总会执行（只带给了的那几项）。
 # 卸载同理：目标已经不在就跳过那一步。读不出现状（命令失败或输出看不懂）时不猜：安装当作「还没有」照常添加和安装，
 # 卸载当作「还在」照常卸载。--dry-run 也会打印这两条只读命令，并把 add、install、uninstall、remove 标注为「已存在（已不在）则跳过」。
 # --reinstall 读不出现状时当作「已安装」，先卸载再安装。
@@ -26,7 +31,7 @@ PLUGIN=learn-anything@$MARKETPLACE
 
 die_usage() {
   echo "install.sh: $1" >&2
-  echo "用法：bash install.sh [--courses-dir <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]" >&2
+  echo "用法：bash install.sh [--courses-dir <绝对路径>] [--guokao-repo <绝对路径>] [--config-dir <目录>]... [--reinstall | --uninstall] [--dry-run]" >&2
   exit 2
 }
 
@@ -59,6 +64,8 @@ trim_slash() {
 # 参数 ------------------------------------------------------------------
 courses_dir=
 courses_given=0
+guokao_repo=
+guokao_given=0
 config_dirs=()
 uninstall=0
 reinstall=0
@@ -75,6 +82,17 @@ while [ $# -gt 0 ]; do
     --courses-dir=*)
       courses_dir=${1#--courses-dir=}
       courses_given=1
+      shift
+      ;;
+    --guokao-repo)
+      [ $# -ge 2 ] || die_usage "--guokao-repo 需要一个路径"
+      guokao_repo=$2
+      guokao_given=1
+      shift 2
+      ;;
+    --guokao-repo=*)
+      guokao_repo=${1#--guokao-repo=}
+      guokao_given=1
       shift
       ;;
     --config-dir)
@@ -105,6 +123,17 @@ if [ "$courses_given" -eq 1 ]; then
   esac
   has_cntrl "$courses_dir" && die_usage "--courses-dir 里不能有换行、制表符等控制字符"
   courses_dir=$(trim_slash "$courses_dir")
+fi
+
+if [ "$guokao_given" -eq 1 ]; then
+  [ -n "$guokao_repo" ] || die_usage "--guokao-repo 的值不能为空"
+  [ "$uninstall" -eq 0 ] || die_usage "--guokao-repo 只在安装时使用，不能与 --uninstall 同用"
+  case $guokao_repo in
+    /*) ;;
+    *) die_usage "--guokao-repo 必须是绝对路径：$guokao_repo" ;;
+  esac
+  has_cntrl "$guokao_repo" && die_usage "--guokao-repo 里不能有换行、制表符等控制字符"
+  guokao_repo=$(trim_slash "$guokao_repo")
 fi
 
 i=0
@@ -300,11 +329,20 @@ if [ "$uninstall" -eq 0 ] && [ "$dry_run" -eq 0 ] && [ -n "$courses_dir" ] && [ 
   echo "提示：课程目录 $courses_dir 还不存在，请先创建它。" >&2
 fi
 
-if [ -n "$courses_dir" ]; then
-  values="{\"courses_dir\":\"$(json_escape "$courses_dir")\"}"
-else
-  values=
+if [ "$uninstall" -eq 0 ] && [ "$dry_run" -eq 0 ] && [ -n "$guokao_repo" ] && [ ! -d "$guokao_repo" ]; then
+  echo "提示：国考题库仓库 $guokao_repo 还不存在，请先创建它或确认路径。" >&2
 fi
+
+# configure 的 JSON 只放给了的那几项（configure 按键合并，见头注释）
+values=
+if [ -n "$courses_dir" ]; then
+  values="\"courses_dir\":\"$(json_escape "$courses_dir")\""
+fi
+if [ -n "$guokao_repo" ]; then
+  [ -n "$values" ] && values="$values,"
+  values="$values\"guokao_repo\":\"$(json_escape "$guokao_repo")\""
+fi
+[ -n "$values" ] && values="{$values}"
 
 # 记一次失败：立刻说明是哪个配置目录的哪一步
 fail_step() {
@@ -360,7 +398,7 @@ while [ "$i" -lt "${#targets[@]}" ]; do
       claude_step "$dir" "" "已安装则跳过" plugin install "$PLUGIN" --scope user || { fail_step "安装 plugin"; continue; }
     fi
     if [ -n "$values" ]; then
-      claude_step "$dir" "$values" "" plugin configure "$PLUGIN" --values-stdin || fail_step "配置 courses_dir"
+      claude_step "$dir" "$values" "" plugin configure "$PLUGIN" --values-stdin || fail_step "配置 plugin 选项"
     fi
   fi
 done

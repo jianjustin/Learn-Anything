@@ -130,6 +130,34 @@ expect_has "顺序" "$(printf '%s\n' "$first_three" | sed -n 1p)" 'marketplace a
 expect_has "顺序" "$(printf '%s\n' "$first_three" | sed -n 2p)" ' install '
 expect_has "顺序" "$(printf '%s\n' "$first_three" | sed -n 3p)" 'configure'
 
+# 1b. --guokao-repo：两项都给时 configure 的 JSON 解析回两个键；只给它也有 configure；两种写法等价；末尾斜杠去掉
+keys_of() { # 从 stdin 读 JSON，输出 "键1,键2|值1|值2"
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+Object.keys(v).map(k=>v[k]).join("|"))})' 2>&1
+}
+claude() { cat; }
+out=$("$BASH_BIN" install.sh --dry-run --config-dir /tmp/a --courses-dir /tmp/c --guokao-repo /tmp/g 2>&1); code=$?
+expect_code "两项都给" "$code" 0
+plus=$(plus_lines "$out")
+expect_count "两项都给" "$plus" '^+ ' 3
+expect_count "两项都给只有一条 configure" "$plus" 'configure learn-anything@learn-anything-local --values-stdin' 1
+conf_line=$(printf '%s\n' "$plus" | grep configure)
+got=$(eval "${conf_line#+ }" | keys_of)
+if [ "$got" = "courses_dir,guokao_repo|/tmp/c|/tmp/g" ]; then ok; else bad "两项都给：JSON 解析不回两个键：$got"; fi
+
+out=$("$BASH_BIN" install.sh --dry-run --config-dir /tmp/a --guokao-repo=/tmp/g// 2>&1); code=$?
+expect_code "只给题库仓库" "$code" 0
+plus=$(plus_lines "$out")
+expect_count "只给题库仓库" "$plus" '^+ ' 3
+conf_line=$(printf '%s\n' "$plus" | grep configure)
+got=$(eval "${conf_line#+ }" | keys_of)
+if [ "$got" = "guokao_repo|/tmp/g" ]; then ok; else bad "只给题库仓库：JSON 不对（应只有 guokao_repo，且去掉末尾斜杠）：$got"; fi
+
+out=$("$BASH_BIN" install.sh --dry-run --config-dir /tmp/a --courses-dir /tmp/c 2>&1)
+conf_line=$(plus_lines "$out" | grep configure)
+got=$(eval "${conf_line#+ }" | keys_of)
+if [ "$got" = "courses_dir|/tmp/c" ]; then ok; else bad "只给课程目录：JSON 里不该有 guokao_repo：$got"; fi
+unset -f claude
+
 # 2. 不给 --courses-dir：没有 configure 行
 out=$("$BASH_BIN" install.sh --dry-run --config-dir /tmp/a 2>&1); code=$?
 expect_code "无课程目录" "$code" 0
@@ -155,6 +183,10 @@ expect_not "卸载" "$plus" 'marketplace add'
 "$BASH_BIN" install.sh --dry-run --config-dir relative >/dev/null 2>&1; expect_code "相对的配置目录" "$?" 2
 "$BASH_BIN" install.sh --dry-run --uninstall --courses-dir /tmp/c >/dev/null 2>&1; expect_code "卸载时给课程目录" "$?" 2
 "$BASH_BIN" install.sh --dry-run --courses-dir "$(printf '/tmp/a\nb')" >/dev/null 2>&1; expect_code "课程目录含换行" "$?" 2
+"$BASH_BIN" install.sh --dry-run --guokao-repo relative/dir >/dev/null 2>&1; expect_code "相对的题库仓库" "$?" 2
+"$BASH_BIN" install.sh --dry-run --guokao-repo >/dev/null 2>&1; expect_code "--guokao-repo 缺参数" "$?" 2
+"$BASH_BIN" install.sh --dry-run --uninstall --guokao-repo /tmp/g >/dev/null 2>&1; expect_code "卸载时给题库仓库" "$?" 2
+"$BASH_BIN" install.sh --dry-run --guokao-repo "$(printf '/tmp/a\nb')" >/dev/null 2>&1; expect_code "题库仓库含换行" "$?" 2
 
 # 5. 默认目录：默认目录不加前缀；~/.claude-ccswitch 存在时处理它；CLAUDE_CONFIG_DIR 指向别处时也处理它
 home=$(mktemp -d)
@@ -207,6 +239,15 @@ json=$(eval "${conf_line#+ }")
 got=$(printf '%s' "$json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+v.courses_dir)})' 2>&1)
 if [ "$got" = "courses_dir|$weird" ]; then ok; else bad "特殊路径的 JSON 解析不回原路径：$got"; fi
 
+
+# 同样的特殊路径给 --guokao-repo：命令行引用正确，JSON 解析回原路径
+out=$("$BASH_BIN" install.sh --dry-run --config-dir "/tmp/配置 目录" --guokao-repo "$weird" 2>&1); code=$?
+expect_code "特殊路径（题库仓库）" "$code" 0
+conf_line=$(plus_lines "$out" | grep 'configure')
+json=$(eval "${conf_line#+ }")
+got=$(printf '%s' "$json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+v.guokao_repo)})' 2>&1)
+if [ "$got" = "guokao_repo|$weird" ]; then ok; else bad "特殊路径的 JSON 解析不回题库仓库路径：$got"; fi
+
 unset -f claude
 
 # 7. 环境缺失：找不到 claude、找不到 node、node 太老，都以 1 退出并说明原因
@@ -233,6 +274,9 @@ rm -rf "$empty"
 "$BASH_BIN" install.sh --dry-run --courses-dir "" >/dev/null 2>&1; expect_code "--courses-dir 空值" "$?" 2
 "$BASH_BIN" install.sh --dry-run --courses-dir= >/dev/null 2>&1; expect_code "--courses-dir= 空值" "$?" 2
 "$BASH_BIN" install.sh --dry-run --uninstall --courses-dir= >/dev/null 2>&1; expect_code "卸载时 --courses-dir= 空值" "$?" 2
+"$BASH_BIN" install.sh --dry-run --guokao-repo "" >/dev/null 2>&1; expect_code "--guokao-repo 空值" "$?" 2
+"$BASH_BIN" install.sh --dry-run --guokao-repo= >/dev/null 2>&1; expect_code "--guokao-repo= 空值" "$?" 2
+"$BASH_BIN" install.sh --dry-run --uninstall --guokao-repo= >/dev/null 2>&1; expect_code "卸载时 --guokao-repo= 空值" "$?" 2
 "$BASH_BIN" install.sh --dry-run --config-dir "" >/dev/null 2>&1; expect_code "--config-dir 空值" "$?" 2
 err=$(env -u HOME "$BASH_BIN" install.sh --dry-run 2>&1 >/dev/null); code=$?
 expect_code "HOME 没设置" "$code" 1
@@ -307,6 +351,20 @@ weird='/tmp/课程 "x" \y'"'"'z'
 stdin=$(grep -F "$(printf 'plugin\037configure')" "$STUB_LOG" | tr '\036' '\n' | sed -n 's/^STDIN=//p')
 got=$(printf '%s' "$stdin" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+v.courses_dir)})' 2>&1)
 if [ "$got" = "courses_dir|$weird" ]; then ok; else bad "特殊路径：configure 收到的 JSON 解析不回原路径：$got"; fi
+
+# 真实执行：--guokao-repo 单给、与 --courses-dir 同给，configure 收到的 JSON 都对；特殊字符路径解析回原值
+reset_stub
+"$BASH_BIN" install.sh --config-dir /tmp/a --guokao-repo "$weird" >/dev/null 2>&1; expect_code "只给题库仓库，真实执行" "$?" 0
+expect_log "只给题库仓库，真实执行" "plugin configure learn-anything@learn-anything-local --values-stdin" 1
+stdin=$(grep -F "$(printf 'plugin\037configure')" "$STUB_LOG" | tr '\036' '\n' | sed -n 's/^STDIN=//p')
+got=$(printf '%s' "$stdin" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+v.guokao_repo)})' 2>&1)
+if [ "$got" = "guokao_repo|$weird" ]; then ok; else bad "特殊路径：configure 收到的 JSON 解析不回题库仓库路径：$got"; fi
+reset_stub
+"$BASH_BIN" install.sh --config-dir /tmp/a --courses-dir "$weird" --guokao-repo /tmp/g >/dev/null 2>&1; expect_code "两项都给，真实执行" "$?" 0
+stdin=$(grep -F "$(printf 'plugin\037configure')" "$STUB_LOG" | tr '\036' '\n' | sed -n 's/^STDIN=//p')
+got=$(printf '%s' "$stdin" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s);process.stdout.write(Object.keys(v).join(",")+"|"+v.courses_dir+"|"+v.guokao_repo)})' 2>&1)
+if [ "$got" = "courses_dir,guokao_repo|$weird|/tmp/g" ]; then ok; else bad "两项都给：configure 收到的 JSON 不对：$got"; fi
+same_as_dry "两项都给，dry-run 与执行一致" --config-dir /tmp/a --courses-dir /tmp/c --guokao-repo /tmp/g
 
 # 重复运行：已有的 marketplace 和 plugin 不再添加、安装，configure 照常执行
 reset_stub

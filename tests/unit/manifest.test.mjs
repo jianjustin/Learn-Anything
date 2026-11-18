@@ -14,6 +14,16 @@ test('plugin.json：名字、版本和课程目录配置项', () => {
   assert.equal(m.userConfig.courses_dir.required, true);
 });
 
+test('plugin.json：国考题库仓库配置项（可选的目录）', () => {
+  const m = json(path.join(PLUGIN_DIR, '.claude-plugin/plugin.json'));
+  const c = m.userConfig.guokao_repo;
+  assert.equal(c.type, 'directory');
+  assert.equal(c.title, '国考题库仓库');
+  assert.equal(c.required, false);
+  assert.equal(typeof c.description, 'string');
+  assert.ok(c.description.length > 0);
+});
+
 test('marketplace.json：指向 plugin 目录', () => {
   const m = json(path.join(ROOT, '.claude-plugin/marketplace.json'));
   assert.equal(m.name, 'learn-anything-local');
