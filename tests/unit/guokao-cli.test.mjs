@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT, SCRIPTS_DIR } from '../helpers/paths.mjs';
@@ -344,6 +344,8 @@ test('image：hold 题、没有题图的题、题库里没有的题拒绝，文�
   const hold = bankCopy();
   const zhenti = path.join(refsOf(hold), 'zhenti/xingce-shuliang.data.js');
   writeFileSync(zhenti, readFileSync(zhenti, 'utf8').replace('"no": 72, "type": "rongchi", "hold": true', '"no": 72, "type": "rongchi", "hold": true, "img": "img/2024-70.png"'));
+  const held = lib.loadRepo(hold).zhenti('xingce-shuliang').items.find((i) => i.year === '2025地市' && i.no === 72);
+  assert.ok(held.hold && held.img, '夹具里这道 hold 题应带 img，否则下面的拒绝测不到 hold 规则');
   for (const [repo, key] of [[hold, '2025地市-72'], [bankRoot, '2024-63'], [bankRoot, '2025地市-68'], [bankRoot, '2099-1']]) {
     const r = run('image', repo, file, 'fangcheng', key);
     assert.equal(r.status, 1, key);
@@ -364,4 +366,149 @@ test('image：课程 id 不存在时退出 1；参数不对退出 2', () => {
   assert.equal(run('image', bankRoot, file, 'fangcheng').status, 2);
   assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt').status, 2);
   assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--nope').status, 2);
+});
+
+test('image：重复运行幂等，同标题的卡原位替换', () => {
+  const file = makeCourse();
+  assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt', '第一版').status, 0);
+  const once = lessonOf(read(file), 'fangcheng').cards;
+  const at = once.findIndex((c) => c.title === '2024-70 题图');
+  assert.ok(at >= 0);
+  assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt', '第二版').status, 0);
+  const twice = lessonOf(read(file), 'fangcheng').cards;
+  assert.equal(twice.length, once.length);
+  assert.equal(twice.filter((c) => c.title === '2024-70 题图').length, 1);
+  assert.equal(twice.findIndex((c) => c.title === '2024-70 题图'), at);
+  assert.ok(twice[at].html.includes('第二版') && !twice[at].html.includes('第一版'));
+  // 同样的参数再跑一次，文件不变
+  const before = hash(file);
+  assert.equal(run('image', bankRoot, file, 'fangcheng', '2024-70', '--alt', '第二版').status, 0);
+  assert.equal(hash(file), before);
+});
+
+// ---- new ----
+
+const SLUG = 'xingce-shuliang';
+const indexOf = (dir) => readDataFile(path.join(dir, 'index-data.js'), 'LEARN_INDEX');
+
+test('new：按大纲建课，全部 todo，带系列和两张表格卡，已登记', () => {
+  const home = tmp();
+  const r = run('new', bankRoot, home, SLUG);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${path.join(home, SLUG, 'course.html')}\n`);
+  assert.ok(existsSync(path.join(home, SLUG, 'course.html')));
+  const course = read(path.join(home, SLUG, 'course-data.js'));
+  assert.deepEqual(plain(C.validateCourse(course, { dirName: SLUG }).errors), []);
+  assert.equal(course.template, 'guokao');
+  assert.deepEqual(course.series, { name: '国考', order: 4 });
+  assert.equal(course.topic, '数量关系');
+  assert.equal(course.templateData.subject, 'xingce');
+  assert.equal(course.templateData.exam.count, 15);
+  assert.deepEqual(course.resume, { lesson: 'kaoqing', note: '尚未开始' });
+  assert.deepEqual(course.lessons.map((l) => l.id), ['kaoqing', 'fangcheng', 'celve']);
+  assert.ok(course.lessons.every((l) => l.status === 'todo' && l.mastered === false));
+  assert.deepEqual(course.lessons.map((l) => l.cards.length), [2, 0, 0]);
+  assert.deepEqual(course.lessons[0].cards.map((c) => c.generated), [lib.TABLE_MARK.typemap, lib.TABLE_MARK.examgrid]);
+  assert.deepEqual(course.review, []);
+  assert.match(course.updatedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/);
+  // 题型地图的 count 取题库，真题覆盖是题库的
+  const [typemap, examgrid] = course.templateData.growth;
+  assert.deepEqual(typemap.nodes.map((n) => n.id), ['fangcheng', 'jihe', 'rongchi', 'jingji']);
+  assert.deepEqual(typemap.nodes[0].count, { 2024: 4, 2025: 3, 2026: 1 });
+  assert.equal(examgrid.items.length, 7);
+  // 建课后立刻同步，课程不变
+  const file = path.join(home, SLUG, 'course-data.js');
+  const before = hash(file);
+  assert.equal(run('sync', bankRoot, file).status, 0);
+  assert.equal(hash(file), before);
+  // 登记
+  assert.deepEqual(indexOf(home).courses.map((c) => c.slug), [SLUG]);
+  assert.ok(existsSync(path.join(home, 'index.html')));
+});
+
+test('new：hold 题的 img 不进课程文件', () => {
+  const repo = bankCopy();
+  const zhenti = path.join(refsOf(repo), 'zhenti/xingce-shuliang.data.js');
+  writeFileSync(zhenti, readFileSync(zhenti, 'utf8').replace('"hold": true }', '"hold": true, "img": "img/2024-70.png" }'));
+  assert.ok(lib.loadRepo(repo).zhenti(SLUG).items.some((i) => i.hold && i.img));
+  const home = tmp();
+  const r = run('new', repo, home, SLUG);
+  assert.equal(r.status, 0, r.stderr);
+  const items = read(path.join(home, SLUG, 'course-data.js')).templateData.growth[1].items;
+  assert.ok(items.filter((i) => i.hold).length >= 2);
+  for (const it of items.filter((i) => i.hold)) assert.equal(Object.hasOwn(it, 'img'), false);
+  assert.equal(items.find((i) => i.no === 70).img, 'img/2024-70.png');
+});
+
+test('new：大纲里没有的 slug、已存在的课程、不合法的路径退出 1，什么都不建', () => {
+  const home = tmp();
+  for (const slug of ['nosuch', 'toString', '../x', '']) {
+    const r = run('new', bankRoot, home, slug);
+    assert.equal(r.status, 1, JSON.stringify(slug));
+    assert.match(r.stderr, /^✗/m);
+  }
+  assert.deepEqual(readdirSync(home), []);
+
+  assert.equal(run('new', bankRoot, home, SLUG).status, 0);
+  const file = path.join(home, SLUG, 'course-data.js');
+  const before = hash(file);
+  const again = run('new', bankRoot, home, SLUG);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /已存在/);
+  assert.equal(hash(file), before);
+  assert.equal(indexOf(home).courses.length, 1);
+
+  const fresh = tmp();
+  for (const [repo, dir] of [['', fresh], ['relative/repo', fresh], [bankRoot, ''], [bankRoot, 'relative/courses'], [bankRoot, '${COURSES_DIR}']]) {
+    const r = run('new', repo, dir, SLUG);
+    assert.equal(r.status, 1, JSON.stringify([repo, dir]));
+    assert.match(r.stderr, /^✗/m);
+  }
+  assert.deepEqual(readdirSync(fresh), []);
+  assert.equal(run('new', bankRoot, home).status, 2);
+  assert.equal(run('new', bankRoot).status, 2);
+  assert.equal(run('new', bankRoot, home, SLUG, 'extra').status, 2);
+});
+
+test('new：题库没有这门课的真题清单时，只建题型地图', () => {
+  const repo = bankCopy();
+  rmSync(path.join(refsOf(repo), 'zhenti/xingce-shuliang.data.js'));
+  const home = tmp();
+  const r = run('new', repo, home, SLUG);
+  assert.equal(r.status, 0, r.stderr);
+  const course = read(path.join(home, SLUG, 'course-data.js'));
+  assert.deepEqual(course.templateData.growth.map((g) => g.kind), ['typemap']);
+  assert.deepEqual(course.lessons[0].cards.map((c) => c.generated), [lib.TABLE_MARK.typemap]);
+});
+
+test('buildInitial：纯函数，字段与 guokao-sprint 的 buildCourse 一致', () => {
+  const repo = lib.loadRepo(bankRoot);
+  const outline = repo.outline(SLUG);
+  const zhenti = repo.zhenti(SLUG);
+  const snapshot = structuredClone({ outline, zhenti });
+  const o = lib.buildInitial(SLUG, outline, zhenti, '2026-11-18T15:20:00+08:00');
+  assert.deepEqual({ outline, zhenti }, snapshot);
+  assert.deepEqual(Object.keys(o), ['version', 'topic', 'slug', 'subject', 'exam', 'updatedAt', 'resume', 'review', 'growth', 'lessons']);
+  assert.equal(o.updatedAt, '2026-11-18T15:20:00+08:00');
+  assert.deepEqual(o.resume, { lesson: 'kaoqing', note: '尚未开始' });
+  assert.deepEqual(o.lessons[2], { id: 'celve', title: '做与跳', summary: '限时策略', status: 'todo', cards: [] });
+  assert.equal(o.growth[1].kind, 'examgrid');
+  assert.deepEqual(o.growth[0].nodes[3], {
+    id: 'jingji', label: '经济利润', methods: '利润 = 售价 - 成本', lesson: 'celve', count: { 2024: 1, 2025: 0, 2026: 0 },
+  });
+  // 没有题库：只有题型地图，count 取大纲
+  const bare = lib.buildInitial(SLUG, outline, null, 'x');
+  assert.deepEqual(bare.growth.map((g) => g.kind), ['typemap']);
+  assert.ok(!('count' in bare.growth[0].nodes[0]));
+  const withCount = structuredClone(outline);
+  withCount.typemap.nodes[0].count = { 2024: 9 };
+  assert.deepEqual(lib.buildInitial(SLUG, withCount, null, 'x').growth[0].nodes[0].count, { 2024: 9 });
+  assert.deepEqual(lib.buildInitial(SLUG, withCount, zhenti, 'x').growth[0].nodes[0].count, { 2024: 4, 2025: 3, 2026: 1 });
+});
+
+test('localIso：本机时区偏移，形如 +08:00', () => {
+  const d = new Date(2026, 10, 18, 15, 20, 0);
+  const s = lib.localIso(d);
+  assert.match(s, /^2026-11-18T15:20:00[+-]\d\d:\d\d$/);
+  assert.equal(new Date(s).getTime(), d.getTime());
 });

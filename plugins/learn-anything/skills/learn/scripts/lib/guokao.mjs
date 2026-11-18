@@ -245,3 +245,64 @@ export function syncGrowth(course, zhenti, outline) {
   if (!oldExamgrid) growth.push(examgrid);
   return { growth, dropped, added };
 }
+
+// 本机时区的当前时间，ISO 8601，带偏移，如 2026-11-18T15:20:00+08:00
+export function localIso(date = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  const off = -date.getTimezoneOffset();
+  const sign = off < 0 ? '-' : '+';
+  const abs = Math.abs(off);
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`;
+}
+
+// 按仓库大纲（outline）和题库真题清单（zhenti，可为 null）造一门国考课的初始状态：旧格式，和 guokao-sprint 的 bootstrap 一致。
+// 全部课 todo、cards 为空；题型地图的 count 优先取题库；有题库再加真题覆盖。hold 题的 img 不带进来。不改传入的对象。
+export function buildInitial(slug, outline, zhenti, updatedAt) {
+  const o = outline;
+  if (!isObj(o) || !Array.isArray(o.lessons) || o.lessons.length === 0 || !o.lessons.every(isObj)) {
+    throw new MigrateError(`仓库大纲里 ${slug} 没有课（lessons 不是非空数组）`);
+  }
+  if (!isObj(o.typemap) || !Array.isArray(o.typemap.nodes) || !o.typemap.nodes.every(isObj)) {
+    throw new MigrateError(`仓库大纲里 ${slug} 没有题型地图（typemap.nodes 不是数组）`);
+  }
+  const bank = isObj(zhenti) ? zhenti : null;
+  const counts = new Map(list(bank?.nodes).filter(isObj).map((n) => [n.id, n.count]));
+  const typemap = {
+    kind: 'typemap',
+    title: o.typemap.title || '题型地图',
+    nodes: o.typemap.nodes.map((n) => {
+      const node = {
+        id: n.id, label: n.label, methods: n.methods, lesson: structuredClone(n.lesson),
+      };
+      const count = counts.get(n.id) || n.count;
+      if (count) node.count = structuredClone(count);
+      return node;
+    }),
+  };
+  const growth = [typemap];
+  if (bank) {
+    growth.push({
+      kind: 'examgrid',
+      title: '真题覆盖',
+      years: structuredClone(list(bank.years)),
+      items: list(bank.items).filter(isObj).map((it) => {
+        const { img, ...noImg } = it;
+        return structuredClone(it.hold ? noImg : it);
+      }),
+    });
+  }
+  return {
+    version: 1,
+    topic: o.topic,
+    slug,
+    subject: o.subject,
+    ...(o.exam ? { exam: structuredClone(o.exam) } : {}),
+    updatedAt,
+    resume: { lesson: o.lessons[0].id, note: '尚未开始' },
+    review: [],
+    growth,
+    lessons: o.lessons.map((l) => ({
+      id: l.id, title: l.title, summary: l.summary, ...(l.optional ? { optional: true } : {}), status: 'todo', cards: [],
+    })),
+  };
+}
