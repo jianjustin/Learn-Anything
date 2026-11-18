@@ -39,7 +39,7 @@ bash install.sh --courses-dir <课程目录> --guokao-repo <国考题库仓库>
 
 安装完成后开一个新会话。
 
-**改了仓库之后运行 `bash install.sh --reinstall`。** Claude Code 安装本地 marketplace 里的 plugin 时，可能把它复制到自己的缓存目录里使用，而不是直接读仓库源目录；那样的话会话用的仍是旧版，普通的重复运行又会因为「已安装」而跳过。`--reinstall` 对每个配置目录先卸载再安装 plugin（marketplace 保留），然后开一个新会话。到底是缓存里的拷贝还是就地加载，会在第一次实机安装时确认。重装时可以同时带上 `--courses-dir` 和 `--guokao-repo`；`--courses-dir` 没带时脚本会在结尾提醒你确认课程目录的配置还在。
+**改了仓库之后运行 `bash install.sh --reinstall`。** Claude Code 安装本地 marketplace 里的 plugin 时，可能把它复制到自己的缓存目录里使用，而不是直接读仓库源目录；那样的话会话用的仍是旧版，普通的重复运行又会因为「已安装」而跳过。`--reinstall` 对每个配置目录先卸载再安装 plugin（marketplace 保留），然后开一个新会话。到底是缓存里的拷贝还是就地加载，会在第一次实机安装时确认。重装时可以同时带上 `--courses-dir` 和 `--guokao-repo`；`--courses-dir`（或 `--guokao-repo`）没带时，脚本会在结尾提醒你确认课程目录（或国考题库仓库）的配置还在。
 
 **重复运行是安全的。** 每个目录先用只读命令 `claude plugin marketplace list --json` 和 `claude plugin list --json` 看现状：marketplace 已经添加就不再添加，plugin 已经安装（user 范围）就不再安装；给了 `--courses-dir` 或 `--guokao-repo` 时 `configure` 总会执行。所以改课程目录只要重新运行 `bash install.sh --courses-dir <新目录>`，改国考题库仓库只要重新运行 `bash install.sh --guokao-repo <新目录>`。读不出现状（命令失败或输出看不懂）时不猜，照常添加和安装。
 
@@ -114,7 +114,7 @@ node plugins/learn-anything/skills/learn/scripts/refresh-pages.mjs <课程目录
 
 自带一个 `guokao` 模板，用于国考备考类请求：行测（政治理论、常识判断、言语理解与表达、数量关系、判断推理、资料分析）、申论、证监会计算机与证券期货。一个考试模块一门课，全部归入「国考」系列。需要先配置 `guokao_repo`（见「安装」）；没配置时 skill 会停下并告诉你怎么配置，不会凭记忆讲真题。
 
-套用后：不问两个开题问题，也不联网调研；先讲考情和题型地图，再逐类讲识别线索、解法和有出处的真题示范，然后出原创变式（变式就是本课的检验），最后讲做与跳的限时策略。题库留在 guokao_sprint 仓库里，只读它的 `guokao-sprint/references/`，不复制进课程目录或 plugin，脚本也不写这个仓库。留作整卷自测的真题不进对话和课程文件。
+套用后：不问两个开题问题，也不联网调研；先讲考情和题型地图，再逐类讲识别线索、解法和有出处的真题示范，然后出原创变式（变式就是本课的检验），最后讲做与跳的限时策略。题库留在 guokao_sprint 仓库里，不复制进课程目录或 plugin，脚本（`guokao.mjs`、`migrate-guokao.mjs`）只读它的 `guokao-sprint/references/`。只有你要求追加新真题时，模板的追加题目流程才会修改并提交 guokao_sprint 仓库里的文件（`zhenti/<slug>.md`、`<slug>.data.js`、题图，新增题型时还有大纲）。留作整卷自测的真题不进对话和课程文件。
 
 模板带一个脚本 `scripts/guokao.mjs`，有三个子命令，课程文件由它们改写，不手改：
 
@@ -179,7 +179,7 @@ node plugins/learn-anything/skills/learn/scripts/migrate-guokao.mjs <旧课程�
 - 题图卡转成 html 卡，图片按 `data:image` 内嵌进 `course-data.js`，不再依赖 `img/` 目录。
 - 练习记录：「仿哪道题」接在题目后面，用时接在回答后面，错因代码译成中文放在缺口前面；回答为「跳过」的记为已跳过，跳题依据写进缺口。
 - 旧课程的待回顾是没过关的问题，迁成待回顾条目；以「第 N 课」开头的挂到第 N 课，其余不挂课。
-- 掌握按旧练习记录推出：讲完（`done`）的考情课算掌握；其余讲完的课，看练习里最后一条判过对错的是否答对；没讲完的不算掌握。
+- 掌握按旧练习记录推出：讲完（`done`）的考情课算掌握；其余讲完的课，看练习里最后一条判过对错的是否答对；没讲完的不算掌握；还有待回顾条目挂在这一课上的，即使练习记录推出已掌握也不算掌握（待回顾不能指向已掌握的课）。
 
 迁移来的课套用 `guokao` 模板，之后由 learn skill 接着讲，原来的 `.guokao_points/` 不会被改动。每门课的掌握按旧练习记录推出（见上一条），不是一律显示为「已讲」；题库需要按「安装」一节配置 `guokao_repo`。
 
