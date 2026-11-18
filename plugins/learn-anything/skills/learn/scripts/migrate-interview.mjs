@@ -6,59 +6,21 @@
 // <courses_dir> 必须是绝对路径；<旧课程目录> 可以是相对路径。
 // 成功时 stdout 只有一行数量；错误和警告写到 stderr。
 // 退出码：0 成功，1 课程目录不合法、读不了源文件、转换不了、校验有错误、数量不一致、目标已存在或写入失败，2 参数不对。
-import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadCourseCore } from './lib/core-loader.mjs';
 import { coursesDirProblem } from './lib/course-index.mjs';
-import { readDataFile, writeDataFile } from './lib/data-file.mjs';
-import { createCourse, rollback } from './new-course.mjs';
+import {
+  MigrateError, countsOf, isObj, list, loadOldCourse as loadWith, requireValid, shapeOf, summaryLine, writeMigrated,
+} from './lib/migrate-common.mjs';
+
+export { MigrateError, countsOf };
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
-const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const list = (v) => (Array.isArray(v) ? v : []);
 
-// 迁移失败。lines 是要逐行打印的细节（校验错误等）
-export class MigrateError extends Error {
-  constructor(message, lines = []) {
-    super(message);
-    this.name = 'MigrateError';
-    this.lines = lines;
-  }
-}
-
-// 旧课程文件是 JavaScript（键不加引号、有注释和尾逗号、用 join 拼多行字符串），不是 JSON。
-// 整个项目只有 old-course-worker.mjs 执行它，而且是在短命的子进程里：进程内的 vm 限时管不住旧文件能让宿主做的所有事
-// （getter、Proxy、抛出对象的 stack、微任务），所以父进程只给子进程一个硬性的墙钟限时，超时直接 SIGKILL。
-// 从子进程到这里的只有 stdout 里的一个 JSON 字符串。超时、被信号杀掉、退出码非 0、没有输出、输出不是 JSON 对象，一律是 MigrateError。
-const WORKER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lib/old-course-worker.mjs');
-const HARD_LIMIT_MS = 5000;
-const MAX_OUTPUT = 64 * 1024 * 1024;
-
-export function loadOldCourse(file) {
-  const abs = path.resolve(file);
-  const r = spawnSync(process.execPath, [WORKER, abs], {
-    encoding: 'utf8',
-    timeout: HARD_LIMIT_MS,
-    killSignal: 'SIGKILL',
-    maxBuffer: MAX_OUTPUT,
-  });
-  const why = (reason) => new MigrateError(`无法读取旧课程文件 ${abs}：${reason}`);
-  if (r.error) {
-    throw why(r.error.code === 'ETIMEDOUT' ? `执行超过 ${HARD_LIMIT_MS / 1000} 秒，已终止` : `无法运行读取进程（${r.error.code || r.error.message}）`);
-  }
-  if (r.signal) throw why(`读取进程被信号 ${r.signal} 终止`);
-  if (r.status !== 0) throw why(String(r.stderr).trim().split('\n')[0] || `读取进程退出码 ${r.status}`);
-  let course;
-  try {
-    course = JSON.parse(r.stdout);
-  } catch {
-    throw why('读取进程没有给出可解析的 JSON');
-  }
-  if (!isObj(course)) throw why('window.INTERVIEW_COURSE 不是一个对象');
-  return course;
-}
+// 旧课程文件在子进程里执行，见 lib/migrate-common.mjs
+export const loadOldCourse = (file) => loadWith(file, 'INTERVIEW_COURSE');
 
 const NODE_STYLE = { service: 'box', store: 'pill', external: 'outline', placeholder: 'ghost' };
 const NOTICE = '示范案例，请换成你自己的经历';
@@ -180,55 +142,6 @@ export function convertCourse(old) {
   return out;
 }
 
-const PANEL_PARTS = ['nodes', 'edges', 'groups', 'annotations', 'routes', 'versions', 'events'];
-
-// 新旧两种格式都能数：课数、卡片数，以及各面板里各种元素的总数
-export function countsOf(course) {
-  const total = (key, items) => items.reduce((n, x) => n + list(isObj(x) ? x[key] : undefined).length, 0);
-  const lessons = list(course.lessons);
-  const panels = list(course.growth);
-  return {
-    lessons: lessons.length,
-    cards: total('cards', lessons),
-    nodes: total('nodes', panels),
-    edges: total('edges', panels),
-    groups: total('groups', panels),
-    annotations: total('annotations', panels),
-    routes: total('routes', panels),
-    versions: total('versions', panels),
-    events: total('events', panels),
-  };
-}
-
-// 逐课、逐面板的数量，用来核对迁移前后一致（countsOf 只给总数）
-function shapeOf(course) {
-  return {
-    lessons: list(course.lessons).map((l) => [isObj(l) ? l.id : undefined, list(isObj(l) ? l.cards : undefined).length]),
-    panels: list(course.growth).map((g) => PANEL_PARTS.map((k) => list(isObj(g) ? g[k] : undefined).length)),
-  };
-}
-
-// a 是 b 本身或在 b 里面
-function isInside(a, b) {
-  const r = path.relative(b, a);
-  return r === '' || (r !== '..' && !r.startsWith(`..${path.sep}`) && !path.isAbsolute(r));
-}
-
-// 解析符号链接后的绝对路径；路径还不存在时，对最近的已存在的上级解析，再接上剩下的部分
-function realish(p) {
-  let cur = path.resolve(p);
-  const rest = [];
-  while (!existsSync(cur)) {
-    rest.unshift(path.basename(cur));
-    const up = path.dirname(cur);
-    if (up === cur) break;
-    cur = up;
-  }
-  return path.join(realpathSync.native(cur), ...rest);
-}
-
-const summaryLine = (c) => Object.entries(c).map(([k, v]) => `${k}=${v}`).join(' ');
-
 // 转换后应有的数量：与源一致，只有放了备忘卡的那一课多一张
 function expectedCounts(old) {
   const counts = countsOf(old);
@@ -243,17 +156,9 @@ function expectedCounts(old) {
   return { counts, shape };
 }
 
-// p 不存在时，返回这次要新建的最外层目录；p 已存在时返回 null
-function outermostMissing(p) {
-  let cur = path.resolve(p);
-  if (existsSync(cur)) return null;
-  while (!existsSync(path.dirname(cur)) && path.dirname(cur) !== cur) cur = path.dirname(cur);
-  return cur;
-}
-
 // 读、转换、校验、核对都在内存里完成，通过之后才建课和写文件。返回 { dir, counts, warnings }
 // write、remove 只供测试注入失败
-export function migrateCourse(oldDir, coursesDir, { write = writeDataFile, remove = rmSync } = {}) {
+export function migrateCourse(oldDir, coursesDir, { write, remove } = {}) {
   const problem = coursesDirProblem(coursesDir);
   if (problem) throw new MigrateError(problem);
   const oldFile = path.join(path.resolve(oldDir), 'course-data.js');
@@ -261,61 +166,14 @@ export function migrateCourse(oldDir, coursesDir, { write = writeDataFile, remov
   const old = loadOldCourse(oldFile);
   const out = convertCourse(old);
 
-  const slug = out.slug;
-  const { errors, warnings } = loadCourseCore().validateCourse(out, { dirName: slug });
-  if (errors.length > 0) {
-    throw new MigrateError(`转换后的课程没有通过校验（${errors.length} 个错误，${warnings.length} 个警告）`, [
-      ...errors.map((e) => `✗ ${e}`),
-      ...warnings.map((w) => `△ ${w}`),
-    ]);
-  }
+  const warnings = requireValid(loadCourseCore(), out);
   const { counts: before, shape } = expectedCounts(old);
   const after = countsOf(out);
   if (JSON.stringify(before) !== JSON.stringify(after) || JSON.stringify(shape) !== JSON.stringify(shapeOf(out))) {
     throw new MigrateError('转换前后的数量不一致', [`旧：${summaryLine(before)}`, `新：${summaryLine(after)}`]);
   }
-
-  // courses_dir 不能是源目录或在它里面，源目录也不能是这次要建的目录或在它里面：否则会写进源目录
-  const srcReal = realish(oldDir);
-  const homeReal = realish(coursesDir);
-  const targetReal = path.join(homeReal, slug);
-  if (isInside(homeReal, srcReal) || isInside(srcReal, targetReal)) {
-    throw new MigrateError(`目标位置与源目录重叠，拒绝写入：源目录 ${srcReal}，课程目录 ${homeReal}（将创建 ${targetReal}）`);
-  }
-
-  // 记下现状，写入失败时据此还原
-  const home = path.resolve(coursesDir);
-  const createdRoot = outermostMissing(home);
-  const indexFile = path.join(home, 'index-data.js');
-  const indexPage = path.join(home, 'index.html');
-  const indexBefore = existsSync(indexFile) ? readFileSync(indexFile) : null;
-  const indexPageExisted = existsSync(indexPage);
-
-  let created;
-  try {
-    created = createCourse(home, slug); // 自己失败时自己清理
-  } catch (e) {
-    throw new MigrateError(e.message);
-  }
-  const file = path.join(created.dir, 'course-data.js');
-  try {
-    write(file, 'LEARN_COURSE', out);
-    if (JSON.stringify(readDataFile(file, 'LEARN_COURSE')) !== JSON.stringify(out)) {
-      throw new Error('写入后读回的内容与转换结果不一致');
-    }
-  } catch (e) {
-    const error = new MigrateError(`写入失败：${e.message}`);
-    if (indexBefore !== null) {
-      try {
-        writeFileSync(indexFile, indexBefore);
-      } catch (restoreError) {
-        error.message += `（index-data.js 没能恢复：${restoreError.message}）`;
-      }
-    }
-    const undo = [createdRoot, created.dir, indexPageExisted ? null : indexPage, indexBefore === null ? indexFile : null];
-    throw rollback(error, undo.filter(Boolean), remove);
-  }
-  return { dir: created.dir, counts: after, warnings };
+  const dir = writeMigrated(out, oldDir, coursesDir, { write, remove });
+  return { dir, counts: after, warnings };
 }
 
 function main(args) {

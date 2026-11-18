@@ -138,6 +138,26 @@ node plugins/learn-anything/skills/learn/scripts/migrate-interview.mjs <old cour
 
 `<courses directory>` must be an absolute path; `<old course directory>` may be relative. The script only reads the old directory. It writes the new course to `<courses directory>/<course name>/` and registers it, then validates the result and checks that the number of lessons, cards per lesson and panel elements match the source. Old courses have no record of mastery, so every migrated lesson shows as taught. The old review list held parked questions and notes rather than gaps in mastery, so it is not migrated as review items: it becomes one note card titled 「迁移来的备忘」 ("notes carried over") at the front of the lesson you stopped at, which therefore has one card more than the source.
 
+
+## Migrating older civil-service-exam courses
+
+To migrate courses from the guokao-sprint project, one course at a time (`<old course directory>` is `.guokao_points/<course name>/`):
+
+```bash
+node plugins/learn-anything/skills/learn/scripts/migrate-guokao.mjs <old course directory> <courses directory>
+```
+
+Path rules, read-only source, validate-before-write and cleanup on failure are the same as for interview courses. What the conversion does differently:
+
+- The `guokao` template (`template` is `"guokao"`). Every course joins the series 「国考」, so the overview page shows them together, in guokao-sprint's order of nine courses. The subject, the position in the exam paper and the two original panels are kept as they were in `templateData`.
+- The question-type map and the past-exam coverage grid have no matching panel in the new format. Each becomes one table card at the end of the exam-overview lesson, which therefore has two cards more than the source. Both table cards carry a `generated` marker (`guokao-typemap`, `guokao-examgrid`), so the template can find and rewrite them in place. The coverage table has one row per question type and one column per year or paper, with question numbers in the cells; a symbol after a number marks a demonstrated, drill, held-back or compound question (the second type of a compound question is kept only in `templateData`).
+- Image cards become html cards with the image embedded as a `data:image` URL in `course-data.js`, so the `img/` directory is no longer needed.
+- Practice records: the question a variant was based on is appended to the question, the time taken to the answer, and the error-cause code, in Chinese, goes in front of the gap. Answers recorded as 「跳过」 ("skipped") become skipped items, with the reason for skipping in the gap.
+- The old review list held questions that were not yet mastered, so it becomes review items; an item starting with 「第 N 课」 ("lesson N") is attached to lesson N, others to no lesson.
+- Mastery is inferred from the old practice records: a finished (`done`) exam-overview lesson counts as mastered; any other finished lesson counts as mastered when the last practice item that was graded was answered correctly; lessons not yet finished are not mastered.
+
+A migrated course is a copy of the page and the progress: the learn skill does not take civil-service-exam requests, and these courses are still taught by guokao-sprint in `.guokao_points/`.
+
 ## Development and tests
 
 The repository root is a local marketplace and the plugin itself is in `plugins/learn-anything/`. The plugin directory has no `package.json` and no npm dependencies.
