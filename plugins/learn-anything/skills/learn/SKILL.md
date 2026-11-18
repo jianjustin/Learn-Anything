@@ -1,11 +1,12 @@
 ---
 name: learn
-description: 系统学习任意主题，或继续之前的课程：先问目标和基础，联网调研后给出带资料清单的大纲，分段讲授，逐课检验，内容和进度存进本地离线课程页。用于：我想学 xx、系统学习 xx、帮我讲讲 xx、开一门 xx 的课、继续学习、继续上次的 xx、learn xx、teach me xx。也用于面试准备：我想准备 xx 面试、系统设计、八股、项目经历复盘、模拟面试、interview prep、mock interview。不用于考公备考（国考、公务员、行测、申论），那归 guokao-sprint。
+description: 系统学习任意主题，或继续之前的课程：先问目标和基础，联网调研后给出带资料清单的大纲，分段讲授，逐课检验，内容和进度存进本地离线课程页。用于：我想学 xx、系统学习 xx、帮我讲讲 xx、开一门 xx 的课、继续学习、继续上次的 xx、learn xx、teach me xx。也用于面试准备：我想准备 xx 面试、系统设计、八股、项目经历复盘、模拟面试、interview prep、mock interview。也用于国考备考：国考、考公、公务员、行测、申论、数量关系、资料分析、判断推理、言语理解、常识判断、政治理论、证监会计算机、证券期货。
 allowed-tools:
   - Bash(node ${CLAUDE_SKILL_DIR}/scripts/validate.mjs *)
   - Bash(node ${CLAUDE_SKILL_DIR}/scripts/new-course.mjs *)
   - Bash(node ${CLAUDE_SKILL_DIR}/scripts/list-courses.mjs *)
   - Bash(node ${CLAUDE_SKILL_DIR}/scripts/refresh-pages.mjs *)
+  - Bash(node ${CLAUDE_SKILL_DIR}/scripts/guokao.mjs *)
 ---
 
 # learn：系统学习任意主题
@@ -18,7 +19,8 @@ allowed-tools:
 
 - **skill 目录**：`${CLAUDE_SKILL_DIR}`。下文和 references 里的 `assets/`、`scripts/`、`references/`、`templates/` 都相对它。
 - **课程目录**：`${user_config.courses_dir}`。所有课程都放在这里，每门课一个子目录。不在当前工作目录里找课或建课。
-- 这两个路径在你读到本文时已经换成了实际值。你运行的命令拿不到它们作为环境变量，所以把实际路径直接写进命令。references 里把它们写作 `<skill 目录>` 和 `<课程目录>`。
+- **国考题库**：`${user_config.guokao_repo}`。只有 guokao 模板用它，见该模板。
+- 这些路径在你读到本文时已经换成了实际值。你运行的命令拿不到它们作为环境变量，所以把实际路径直接写进命令。references 里把前两个写作 `<skill 目录>` 和 `<课程目录>`。
 
 **课程目录没配置就停下。** 上面「课程目录」后面应当是一个绝对路径。它是空的，或者仍是一段含 `user_config` 字样的占位符文本时，plugin 还没配置。这时告诉学习者用下面任一方式配置，然后结束本次调用，不在任何别的位置建课或找课：
 
@@ -59,6 +61,8 @@ allowed-tools:
 ## 入口
 
 先运行列课程命令 `node ${CLAUDE_SKILL_DIR}/scripts/list-courses.mjs "${user_config.courses_dir}"`，用它的输出得到每门课的主题和进度。它什么都不输出时，就是还没有课。学习者选定之后才读那一门课的 `course-data.js`。
+
+学习者点名的课，或你要拿来判断的列表行，`template` 不是 `null` 时，先读那个模板的 `templates/<name>/TEMPLATE.md`，照它的入口规则决定怎么问、怎么列，再往下走；模板的入口规则优先于下面各条。
 
 - **带主题**（「我想学 xx」）：找有没有相同或相近主题的课。有就用 `AskUserQuestion` 问：续学这门、重开这门、还是另开一门新课。续学进入「续学与回顾」；另开进入「开题」；重开会清掉这门课的全部进度，先说明这一点并得到确认，再从「开题」走起，最后在原目录里重写 `course-data.js`（目录已存在，不再运行建课脚本）。没有相近的课就直接「开题」。
 - **不带主题，或只说「继续学习」**：在对话里列出全部课程，每门一行：主题、已讲几课 / 共几课、已掌握几课、待回顾几条、断点说明。然后用 `AskUserQuestion` 让学习者选（选项最多四个：最近更新的至多三门课各一个，再加一个「开新课」）；课更多时，学习者可以直接打出课名。没有任何课时，问学习者想学什么。

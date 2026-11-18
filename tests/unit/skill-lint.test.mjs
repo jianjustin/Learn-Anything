@@ -14,7 +14,9 @@ const C = loadCore();
 
 test('frontmatter：名字、描述里的触发词、长度', () => {
   assert.equal(data.name, 'learn');
-  for (const w of ['继续学习', '系统学习', '面试', 'mock interview', 'guokao-sprint']) assert.ok(data.description.includes(w), w);
+  for (const w of ['继续学习', '系统学习', '面试', 'mock interview', '国考', '考公', '行测', '申论']) assert.ok(data.description.includes(w), w);
+  assert.ok(!data.description.includes('guokao-sprint'));
+  assert.ok(!data.description.includes('不用于考公'));
   assert.ok(data.description.length <= 1536);
 });
 
@@ -35,6 +37,14 @@ test('正文用到了课程目录配置、两个子代理和弹窗提问', () =>
   for (const w of ['${user_config.courses_dir}', 'course-researcher', 'answer-grader', 'AskUserQuestion', '${CLAUDE_SKILL_DIR}/scripts/validate.mjs', '${CLAUDE_SKILL_DIR}/scripts/new-course.mjs']) {
     assert.ok(body.includes(w), w);
   }
+});
+
+test('正文用到了国考题库配置和 guokao.mjs；入口先读非空 template 的模板入口规则', () => {
+  assert.ok(body.includes('${user_config.guokao_repo}'));
+  assert.ok(allowedTools.includes('Bash(node ${CLAUDE_SKILL_DIR}/scripts/guokao.mjs *)'));
+  const entry = body.split('## 入口')[1].split('\n## ')[0];
+  assert.ok(/`template` 不是 `null`/.test(entry) && entry.includes('TEMPLATE.md') && entry.includes('入口规则'));
+  assert.ok(!/考公[^\n]*不归本 skill|那归 guokao-sprint/.test(body));
 });
 
 test('data-format.md 与实现一致：卡片类型和顶层字段都有说明', () => {

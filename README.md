@@ -15,7 +15,7 @@ This version targets **Claude Code only**, and requires **node 20 or later** (th
 - **An offline course page.** Each course is one self-contained HTML file with no external requests; open it in a browser straight from disk (`file://` works). It updates while you learn: the page reloads its data every 2.5 seconds. When a course has something that evolves lesson by lesson, a "growth panel" (a boxes-and-arrows diagram, code that changes version by version, or a timeline) grows lesson by lesson.
 - **An overview page.** `index.html` in the courses directory lists every course: how many lessons are taught, how many mastered, how many review items are pending, and where you stopped.
 - **A review reminder.** When a new session starts and there is something to review, one line of reminder appears, at most once per day.
-- **Domain templates.** A template adds a domain's own way of teaching on top of the general flow. An interview template is included.
+- **Domain templates.** A template adds a domain's own way of teaching on top of the general flow. An interview template and a civil-service-exam template are included.
 
 ## Install
 
@@ -25,17 +25,23 @@ Clone the repository, then run this from its root:
 bash install.sh --courses-dir <courses directory>
 ```
 
-`<courses directory>` is where all your courses are stored. It must be an absolute path, and it is best to create it first. For each Claude Code configuration directory the script runs, in order:
+`<courses directory>` is where all your courses are stored. It must be an absolute path, and it is best to create it first. To study for the Chinese civil-service exam (国考), add `--guokao-repo <exam bank repository>` (the root of the guokao_sprint repository, also an absolute path; leave it out if you do not need it):
+
+```bash
+bash install.sh --courses-dir <courses directory> --guokao-repo <exam bank repository>
+```
+
+Either option can be given alone: `configure` merges by key, so an option you leave out is not cleared. For each Claude Code configuration directory the script runs, in order:
 
 1. `claude plugin marketplace add <repository root>`: adds the repository root as a local marketplace (named `learn-anything-local`);
 2. `claude plugin install learn-anything@learn-anything-local --scope user`;
-3. when `--courses-dir` is given, `claude plugin configure learn-anything@learn-anything-local --values-stdin` to set the courses directory.
+3. when `--courses-dir` or `--guokao-repo` is given, `claude plugin configure learn-anything@learn-anything-local --values-stdin` to set the courses directory and the exam bank repository (only the options you gave).
 
 Start a new session after installing.
 
-**After changing the repository, run `bash install.sh --reinstall`.** When Claude Code installs a plugin from a local marketplace it may copy it into its own cache and run that copy instead of reading the repository directly. In that case your sessions keep using the old version, and a plain re-run skips the plugin because it is already installed. `--reinstall` uninstalls and then installs the plugin in each configuration directory (the marketplace stays); start a new session afterwards. Whether Claude Code uses a cached copy or loads the plugin in place will be confirmed on the first real install. You can pass `--courses-dir` along with `--reinstall`; if you don't, the script reminds you at the end to check that the courses directory setting is still there.
+**After changing the repository, run `bash install.sh --reinstall`.** When Claude Code installs a plugin from a local marketplace it may copy it into its own cache and run that copy instead of reading the repository directly. In that case your sessions keep using the old version, and a plain re-run skips the plugin because it is already installed. `--reinstall` uninstalls and then installs the plugin in each configuration directory (the marketplace stays); start a new session afterwards. Whether Claude Code uses a cached copy or loads the plugin in place will be confirmed on the first real install. You can pass `--courses-dir` and `--guokao-repo` along with `--reinstall`; if you don't pass `--courses-dir`, the script reminds you at the end to check that the courses directory setting is still there.
 
-**Re-running is safe.** For each directory the script first looks at the current state with two read-only commands, `claude plugin marketplace list --json` and `claude plugin list --json`. A marketplace that is already added is not added again, and a plugin that is already installed (user scope) is not installed again. `configure` always runs when `--courses-dir` is given. So to change the courses directory, just re-run `bash install.sh --courses-dir <new directory>`. If the state cannot be read (the command fails or its output is not understood), the script does not guess and goes ahead with the add and install.
+**Re-running is safe.** For each directory the script first looks at the current state with two read-only commands, `claude plugin marketplace list --json` and `claude plugin list --json`. A marketplace that is already added is not added again, and a plugin that is already installed (user scope) is not installed again. `configure` always runs when `--courses-dir` or `--guokao-repo` is given. So to change the courses directory, just re-run `bash install.sh --courses-dir <new directory>`, and to change the exam bank repository, re-run `bash install.sh --guokao-repo <new directory>`. If the state cannot be read (the command fails or its output is not understood), the script does not guess and goes ahead with the add and install.
 
 Which configuration directories are handled:
 
@@ -49,7 +55,7 @@ Other options:
 - `--reinstall`: if the plugin is installed, uninstall it and install it again; if not, just install it. The marketplace stays. When the state cannot be read, the plugin is treated as installed.
 - `--uninstall`: for each configuration directory, uninstall the plugin and remove the marketplace, skipping a step whose target is already gone. It does not touch any file in your courses directory. It cannot be combined with `--reinstall`.
 - When a directory given with `--config-dir` does not exist, the script prints a one-line notice and carries on.
-- Exit codes: 2 on an unknown argument, a `--courses-dir` value that is empty or not an absolute path, or `--reinstall` together with `--uninstall`. The script exits with code 1 when `claude` cannot be found, node is older than 20, `HOME` is not set, or a command fails. A failure in one configuration directory does not stop the others, and the failing directory is named in the output.
+- Exit codes: 2 on an unknown argument, a `--courses-dir` or `--guokao-repo` value that is empty or not an absolute path, `--reinstall` together with `--uninstall`, or `--guokao-repo` together with `--uninstall`. The script exits with code 1 when `claude` cannot be found, node is older than 20, `HOME` is not set, or a command fails. A failure in one configuration directory does not stop the others, and the failing directory is named in the output.
 
 ## Where courses are stored
 
@@ -64,7 +70,7 @@ All courses live in one global directory, set by the plugin's `courses_dir` opti
     └── course-data.js  # everything about the course and your progress; the only source of progress
 ```
 
-To set or change the directory, either re-run `bash install.sh --courses-dir <new directory>`, or run `/plugin configure learn-anything@learn-anything-local` inside Claude Code. When it is not configured, the skill stops and tells you how to configure it. It does not create a course anywhere else.
+To set or change the directory, either re-run `bash install.sh --courses-dir <new directory>`, or run `/plugin configure learn-anything@learn-anything-local` inside Claude Code. When it is not configured, the skill stops and tells you how to configure it. It does not create a course anywhere else. The exam bank repository (`guokao_repo`) works the same way: set it with `--guokao-repo` or the same `/plugin configure`; only the civil-service-exam template uses it.
 
 `course-data.js` contains `window.LEARN_COURSE = <strict JSON>;`. The scripts and the reminder hook read it with `JSON.parse` only; they never execute it.
 
@@ -82,7 +88,7 @@ In Claude Code, just say:
 I want to learn macroeconomics
 ```
 
-or use the command `/learn-anything:learn` followed by the topic. The skill also triggers automatically from its description: learning any topic, systematic study, continuing a course, and interview preparation all belong to it. Requests with Chinese civil-service-exam keywords (国考, 行测, 申论 and so on) do not.
+or use the command `/learn-anything:learn` followed by the topic. The skill also triggers automatically from its description: learning any topic, systematic study, continuing a course, interview preparation, and civil-service-exam preparation (国考, 考公, 行测, 申论 and so on) all belong to it.
 
 How a course starts: it asks why you are learning, how far you want to get, and what you already know. After researching, it presents the outline in the conversation: the source list, the further reading for each lesson, the sources it could not verify, and a proposed course name. Only after you confirm does it create the course and open the course page. Then the first lesson begins.
 
@@ -103,6 +109,26 @@ You can adjust the outline at any time: add or remove lessons, reorder them, ski
 An `interview` template is included, for interview-preparation requests: system design, knowledge topics, project-experience review, and mock interviews. At the start of a course the skill reads each template's description; if your request matches, the outline opens with "this course uses the interview template", and you can decline.
 
 With the template: no web research by default (unless you ask for it); the outline emphasizes what interviewers dig into; interview questions are woven into the lessons and count as that lesson's check; the last lesson ties the whole course into one route you can say out loud. Where the template conflicts with the general rules, the template wins.
+
+## The civil-service-exam template
+
+A `guokao` template is included, for Chinese civil-service-exam (国考) requests: the 行测 modules (politics, common sense, verbal comprehension, quantitative reasoning, logical reasoning, data analysis), 申论, and the CSRC computer and securities-and-futures papers. One exam module is one course, and all of them belong to the series 「国考」. It needs `guokao_repo` to be configured first (see "Install"); when it is not, the skill stops and tells you how, and does not teach past-exam questions from memory.
+
+With the template: the two opening questions are not asked and no web research is done; the course goes from the exam overview and question-type map, through each question type (how to recognize it, how to solve it, a past-exam question with its source), then original variants (the variants are the lesson's check), to a timed strategy lesson. The question bank stays in the guokao_sprint repository: the template only reads its `guokao-sprint/references/`, never copies it into the courses directory or the plugin, and the scripts never write to that repository. Past-exam questions held back for your own full-paper practice never enter the conversation or the course file.
+
+The template ships a script, `scripts/guokao.mjs`, with three subcommands; they rewrite the course file, so it is not edited by hand:
+
+```bash
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs sync <exam bank repository> <course file> [--demo <row-label-number>]...
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs image <exam bank repository> <course file> <course id> <row-label-number> [--alt <description>]
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs new <exam bank repository> <courses directory> <slug>
+```
+
+- `sync`: recomputes the question-type map and the past-exam coverage table cards from the bank, keeping existing 「已示范」 (demonstrated) marks; `--demo` marks one past-exam question.
+- `image`: embeds a question's figure from the bank as one html card, placed after that lesson's demonstration steps.
+- `new`: creates a civil-service-exam course from the bank's default outline.
+
+All three work out and validate the result in memory first, and write to disk only if it passes.
 
 ## Writing a new template
 
@@ -156,7 +182,7 @@ Path rules, read-only source, validate-before-write and cleanup on failure are t
 - The old review list held questions that were not yet mastered, so it becomes review items; an item starting with 「第 N 课」 ("lesson N") is attached to lesson N, others to no lesson.
 - Mastery is inferred from the old practice records: a finished (`done`) exam-overview lesson counts as mastered; any other finished lesson counts as mastered when the last practice item that was graded was answered correctly; lessons not yet finished are not mastered.
 
-A migrated course is a copy of the page and the progress: the learn skill does not take civil-service-exam requests, and these courses are still taught by guokao-sprint in `.guokao_points/`.
+A migrated course uses the `guokao` template and is taught on by the learn skill from there; the old `.guokao_points/` directory is left untouched. Mastery of each course is inferred from the old practice records (see the previous item), so lessons do not all show as merely taught; the question bank needs `guokao_repo` to be configured as described under "Install".
 
 ## Development and tests
 

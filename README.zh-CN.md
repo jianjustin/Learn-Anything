@@ -15,7 +15,7 @@ learn-anything 是一个 Claude Code plugin，用来系统地学一个主题。�
 - **离线课程页。** 每门课一个单文件 HTML，零外部请求，直接用浏览器打开（`file://` 即可）。边讲边更新，页面每 2.5 秒重新加载数据。有逐课演进的东西时，用「生长面板」（方框加箭头的图、代码逐版演进、时间线）一课一课长出来。
 - **总览页。** 课程目录下的 `index.html` 列出全部课程：已讲几课、已掌握几课、待回顾几条、断点在哪里。
 - **回顾提醒。** 新会话启动时，如果有待回顾的内容，会出现一行提醒，同一天不重复。
-- **领域模板。** 在通用流程上叠加某个领域的专门做法。目前自带面试模板。
+- **领域模板。** 在通用流程上叠加某个领域的专门做法。目前自带面试模板和国考模板。
 
 ## 安装
 
@@ -25,17 +25,23 @@ learn-anything 是一个 Claude Code plugin，用来系统地学一个主题。�
 bash install.sh --courses-dir <课程目录>
 ```
 
-`<课程目录>` 是存放全部课程的目录，必须是绝对路径，建议先建好。脚本会对每个 Claude Code 配置目录依次执行：
+`<课程目录>` 是存放全部课程的目录，必须是绝对路径，建议先建好。要学国考的话再加 `--guokao-repo <国考题库仓库>`（guokao_sprint 仓库的根目录，同样必须是绝对路径；不学国考可以不给）：
+
+```bash
+bash install.sh --courses-dir <课程目录> --guokao-repo <国考题库仓库>
+```
+
+两个选项都可以单独给，`configure` 按键合并，没给的那项不会被清掉。脚本会对每个 Claude Code 配置目录依次执行：
 
 1. `claude plugin marketplace add <仓库根>`：把仓库根作为本地 marketplace（名字 `learn-anything-local`）添加进去；
 2. `claude plugin install learn-anything@learn-anything-local --scope user`；
-3. 给了 `--courses-dir` 时，`claude plugin configure learn-anything@learn-anything-local --values-stdin`，把课程目录配置进去。
+3. 给了 `--courses-dir` 或 `--guokao-repo` 时，`claude plugin configure learn-anything@learn-anything-local --values-stdin`，把课程目录、国考题库仓库配置进去（只带给了的那几项）。
 
 安装完成后开一个新会话。
 
-**改了仓库之后运行 `bash install.sh --reinstall`。** Claude Code 安装本地 marketplace 里的 plugin 时，可能把它复制到自己的缓存目录里使用，而不是直接读仓库源目录；那样的话会话用的仍是旧版，普通的重复运行又会因为「已安装」而跳过。`--reinstall` 对每个配置目录先卸载再安装 plugin（marketplace 保留），然后开一个新会话。到底是缓存里的拷贝还是就地加载，会在第一次实机安装时确认。重装时可以同时带上 `--courses-dir`；没带时脚本会在结尾提醒你确认课程目录的配置还在。
+**改了仓库之后运行 `bash install.sh --reinstall`。** Claude Code 安装本地 marketplace 里的 plugin 时，可能把它复制到自己的缓存目录里使用，而不是直接读仓库源目录；那样的话会话用的仍是旧版，普通的重复运行又会因为「已安装」而跳过。`--reinstall` 对每个配置目录先卸载再安装 plugin（marketplace 保留），然后开一个新会话。到底是缓存里的拷贝还是就地加载，会在第一次实机安装时确认。重装时可以同时带上 `--courses-dir` 和 `--guokao-repo`；`--courses-dir` 没带时脚本会在结尾提醒你确认课程目录的配置还在。
 
-**重复运行是安全的。** 每个目录先用只读命令 `claude plugin marketplace list --json` 和 `claude plugin list --json` 看现状：marketplace 已经添加就不再添加，plugin 已经安装（user 范围）就不再安装；给了 `--courses-dir` 时 `configure` 总会执行。所以改课程目录只要重新运行 `bash install.sh --courses-dir <新目录>`。读不出现状（命令失败或输出看不懂）时不猜，照常添加和安装。
+**重复运行是安全的。** 每个目录先用只读命令 `claude plugin marketplace list --json` 和 `claude plugin list --json` 看现状：marketplace 已经添加就不再添加，plugin 已经安装（user 范围）就不再安装；给了 `--courses-dir` 或 `--guokao-repo` 时 `configure` 总会执行。所以改课程目录只要重新运行 `bash install.sh --courses-dir <新目录>`，改国考题库仓库只要重新运行 `bash install.sh --guokao-repo <新目录>`。读不出现状（命令失败或输出看不懂）时不猜，照常添加和安装。
 
 处理哪些配置目录：
 
@@ -49,7 +55,7 @@ bash install.sh --courses-dir <课程目录>
 - `--reinstall`：plugin 已安装就先卸载再安装，没安装就直接安装；marketplace 保留。读不出现状时当作已安装。
 - `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace，已经不在的那一步跳过。不会动课程目录里的任何文件。不能和 `--reinstall` 同时给。
 - `--config-dir` 指向的目录不存在时，脚本打印一行提示后照常继续。
-- 退出码：参数不认识、`--courses-dir` 的值为空或不是绝对路径、`--reinstall` 和 `--uninstall` 同时给时，退出码 2；找不到 `claude`、node 低于 20、`HOME` 没有设置时，退出码 1；某条命令失败时也是退出码 1。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
+- 退出码：参数不认识、`--courses-dir` 或 `--guokao-repo` 的值为空或不是绝对路径、`--reinstall` 和 `--uninstall` 同时给、`--guokao-repo` 和 `--uninstall` 同时给时，退出码 2；找不到 `claude`、node 低于 20、`HOME` 没有设置时，退出码 1；某条命令失败时也是退出码 1。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
 
 ## 课程存在哪
 
@@ -64,7 +70,7 @@ bash install.sh --courses-dir <课程目录>
     └── course-data.js  # 这门课的全部内容和进度，唯一的进度来源
 ```
 
-设置或修改这个目录有两种办法：重新运行 `bash install.sh --courses-dir <新目录>`，或者在 Claude Code 里运行 `/plugin configure learn-anything@learn-anything-local`。没配置时，skill 会停下并告诉你怎么配置，不会在别的位置建课。
+设置或修改这个目录有两种办法：重新运行 `bash install.sh --courses-dir <新目录>`，或者在 Claude Code 里运行 `/plugin configure learn-anything@learn-anything-local`。没配置时，skill 会停下并告诉你怎么配置，不会在别的位置建课。国考题库仓库（`guokao_repo`）同理，用 `--guokao-repo` 或同一个 `/plugin configure` 设置，只有国考模板用它。
 
 `course-data.js` 的内容是 `window.LEARN_COURSE = <严格 JSON>;`。脚本和提醒 hook 只用 `JSON.parse` 读它，不执行它。
 
@@ -82,7 +88,7 @@ node plugins/learn-anything/skills/learn/scripts/refresh-pages.mjs <课程目录
 我想学宏观经济学
 ```
 
-或者用命令 `/learn-anything:learn` 加上主题。skill 也会按描述自动触发：学习任意主题、系统学习、继续学习、面试准备类请求都归它。带考公关键词（国考、行测、申论等）的请求不归它。
+或者用命令 `/learn-anything:learn` 加上主题。skill 也会按描述自动触发：学习任意主题、系统学习、继续学习、面试准备、国考备考（国考、考公、行测、申论等）类请求都归它。
 
 开课的过程：先问你为什么学、想学到什么程度、已有什么基础；调研后在对话里给出大纲，包括资料清单、逐课的延伸阅读、没能核实的资料和拟定的课程名；你确认后才建课并打开课程页，然后开始第一课。
 
@@ -103,6 +109,26 @@ node plugins/learn-anything/skills/learn/scripts/refresh-pages.mjs <课程目录
 自带一个 `interview` 模板，用于面试准备类请求：系统设计、知识点（八股）、项目经历复盘、模拟面试。开题时 skill 读各模板的说明，请求命中就在大纲开头说明「本课套用面试模板」，你可以说不用。
 
 套用后：默认不做联网调研（你明确想要时照常调研）；大纲突出面试官会深挖的部分；课中穿插面试题，面试题同时算作本课的检验；最后一课把全课串成一条讲得出来的路线。模板的规则与通用规则冲突时，以模板为准。
+
+## 国考模板
+
+自带一个 `guokao` 模板，用于国考备考类请求：行测（政治理论、常识判断、言语理解与表达、数量关系、判断推理、资料分析）、申论、证监会计算机与证券期货。一个考试模块一门课，全部归入「国考」系列。需要先配置 `guokao_repo`（见「安装」）；没配置时 skill 会停下并告诉你怎么配置，不会凭记忆讲真题。
+
+套用后：不问两个开题问题，也不联网调研；先讲考情和题型地图，再逐类讲识别线索、解法和有出处的真题示范，然后出原创变式（变式就是本课的检验），最后讲做与跳的限时策略。题库留在 guokao_sprint 仓库里，只读它的 `guokao-sprint/references/`，不复制进课程目录或 plugin，脚本也不写这个仓库。留作整卷自测的真题不进对话和课程文件。
+
+模板带一个脚本 `scripts/guokao.mjs`，有三个子命令，课程文件由它们改写，不手改：
+
+```bash
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs sync <国考题库仓库> <课程文件> [--demo <行标签-题号>]...
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs image <国考题库仓库> <课程文件> <课程 id> <行标签-题号> [--alt <描述>]
+node plugins/learn-anything/skills/learn/scripts/guokao.mjs new <国考题库仓库> <课程目录> <slug>
+```
+
+- `sync`：从题库重算题型地图和真题覆盖两张表格卡，保留已有的「已示范」标记；`--demo` 给一道真题加标记。
+- `image`：把题库里一道题的题图内嵌成一张 html 卡，插在那一课的示范步骤之后。
+- `new`：按题库的默认大纲新建一门国考课。
+
+三个子命令都先在内存里算好并校验，通过才写盘。
 
 ## 写一个新模板
 
@@ -155,7 +181,7 @@ node plugins/learn-anything/skills/learn/scripts/migrate-guokao.mjs <旧课程�
 - 旧课程的待回顾是没过关的问题，迁成待回顾条目；以「第 N 课」开头的挂到第 N 课，其余不挂课。
 - 掌握按旧练习记录推出：讲完（`done`）的考情课算掌握；其余讲完的课，看练习里最后一条判过对错的是否答对；没讲完的不算掌握。
 
-迁移来的课只是课程页和进度的副本：learn skill 不接考公请求，国考课仍由 guokao-sprint 在 `.guokao_points/` 里继续讲。
+迁移来的课套用 `guokao` 模板，之后由 learn skill 接着讲，原来的 `.guokao_points/` 不会被改动。每门课的掌握按旧练习记录推出（见上一条），不是一律显示为「已讲」；题库需要按「安装」一节配置 `guokao_repo`。
 
 ## 开发与测试
 
