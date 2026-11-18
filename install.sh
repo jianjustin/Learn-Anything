@@ -407,6 +407,10 @@ if [ "$reinstall" -eq 1 ] && [ -z "$courses_dir" ]; then
   echo "提示：重装后请确认课程目录的配置还在：在 Claude Code 里运行 /plugin configure $PLUGIN 查看，或者带上 --courses-dir 重新运行本脚本。"
 fi
 
+if [ "$reinstall" -eq 1 ] && [ -z "$guokao_repo" ]; then
+  echo "提示：重装后请确认国考题库仓库（guokao_repo）的配置还在：在 Claude Code 里运行 /plugin configure $PLUGIN 查看，或者带上 --guokao-repo 重新运行本脚本。"
+fi
+
 if [ "$failed" -ne 0 ]; then
   echo "有命令执行失败：${failed_dirs# }。见上面的输出。" >&2
   exit 1

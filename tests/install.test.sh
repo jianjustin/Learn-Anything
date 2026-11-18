@@ -461,6 +461,7 @@ expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 1p)" 'marketplace 
 expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 2p)" 'plugin uninstall learn-anything@learn-anything-local --scope user  # 未安装则跳过'
 expect_has "重装 dry-run" "$(printf '%s\n' "$plus" | sed -n 3p)" 'plugin install learn-anything@learn-anything-local --scope user$'
 expect_has "重装没给课程目录时提示确认配置" "$out" '重装后请确认课程目录的配置还在'
+expect_has "重装没给题库仓库时提示确认配置" "$out" '重装后请确认国考题库仓库（guokao_repo）的配置还在'
 expect_log "dry-run 不执行" "plugin" 0
 
 reset_stub
@@ -475,6 +476,19 @@ expect_log "重装，已安装" "plugin configure learn-anything@learn-anything-
 order=$(grep -F "CCD=/tmp/a" "$STUB_LOG" | tr '\037' ' ' | sed -n 's/^CCD=[^ ]* plugin \([a-z]*\) .*$/\1/p' | tr '\n' ',')
 if [ "$order" = "marketplace,list,uninstall,install,configure," ]; then ok; else bad "重装，已安装：命令顺序不对：$order"; fi
 expect_not "给了课程目录就不提示" "$out" '重装后请确认课程目录的配置还在'
+expect_has "只给课程目录时仍提示题库仓库" "$out" '重装后请确认国考题库仓库（guokao_repo）的配置还在'
+
+reset_stub
+out=$("$BASH_BIN" install.sh --reinstall --config-dir /tmp/a --guokao-repo /tmp/g 2>&1); code=$?
+expect_code "重装，只给题库仓库" "$code" 0
+expect_has "只给题库仓库时仍提示课程目录" "$out" '重装后请确认课程目录的配置还在'
+expect_not "给了题库仓库就不提示" "$out" '重装后请确认国考题库仓库'
+
+reset_stub
+out=$("$BASH_BIN" install.sh --reinstall --config-dir /tmp/a --courses-dir /tmp/c --guokao-repo /tmp/g 2>&1); code=$?
+expect_code "重装，两项都给" "$code" 0
+expect_not "两项都给就都不提示（课程目录）" "$out" '重装后请确认课程目录的配置还在'
+expect_not "两项都给就都不提示（题库仓库）" "$out" '重装后请确认国考题库仓库'
 
 reset_stub
 export STUB_MARKET_PRESENT=1
@@ -484,6 +498,7 @@ expect_log "重装，未安装" "plugin uninstall" 0
 expect_log "重装，未安装" "plugin install learn-anything@learn-anything-local --scope user" 1
 expect_log "重装，未安装" "plugin configure" 0
 expect_has "重装，未安装的提示" "$out" '重装后请确认课程目录的配置还在'
+expect_has "重装，未安装的题库仓库提示" "$out" '重装后请确认国考题库仓库（guokao_repo）的配置还在'
 
 reset_stub
 "$BASH_BIN" install.sh --reinstall --uninstall --dry-run --config-dir /tmp/a >/dev/null 2>&1; expect_code "重装和卸载同时给" "$?" 2
