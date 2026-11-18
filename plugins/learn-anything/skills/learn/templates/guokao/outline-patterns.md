@@ -71,7 +71,7 @@
 | （六）软件工程与项目管理 | 定义、生命周期、过程与项目管理（shengming） → 结构化与面向对象方法（mianxiang） → 软件测试与维护（ceshi） | shengming、xiangmu、minjie；jiegouhua、mianxiang；ceshi |
 | （七）新技术 | 大数据与云计算（dashuju） → 人工智能（ai） → 区块链（qukuailian） → 其他新技术与数字经济（qita，可选） | dashuju、yun；ai；qukuailian；qita |
 
-操作系统基本概念的节点是 `gainian`，数据库基本概念与数据模型的节点是 `shujuku`，不要混用。讲某一课时，本课的真题是「题型地图」里对应本课的全部题型在题库里的题；真题库 `<题库>/zhenti/computer-zhuanye.md` 开头的「按课汇总」给出各章、各课题数。策略课的限时组练可以直接用一整年 60 题（40 单选 + 20 多选）。
+操作系统基本概念的节点是 `gainian`，数据库基本概念与数据模型的节点是 `shujuku`，不要混用。讲某一课时，本课的真题是「题型地图」里对应本课的全部题型在题库里的题；真题库 `<题库>/zhenti/computer-zhuanye.md` 开头的「按课汇总」（只读到第一个 `###` 之前，不整个读；读法见 TEMPLATE.md「读题库 md 的规矩」）给出各章、各课题数。策略课的限时组练可以直接用一整年 60 题（40 单选 + 20 多选）。
 
 ### 证券期货（subject `finance`，一门课，按制度主线七步）
 
@@ -87,7 +87,7 @@
 | 谁监管 | 监管机构、自律组织与法律体系（jianguan） → 信息披露与证券违法行为（pilu） → 投资者与投资者保护（baohu） | jianguan、zilv、falv；pilu、weifa；touzizhe、baohu |
 | 政策与改革 | 习近平经济思想与「十五五」部署（sixiang） → 资本市场改革与双向开放（gaige） | sixiang、shiwuwu；tourongzi、renxing、kaifang |
 
-基金产品的节点是 `jijin`，基金公司（管理人与托管人）的节点是 `jijingongsi`，不要混用。讲某一课时，本课的真题是「题型地图」里对应本课的全部题型在题库里的题；真题库 `<题库>/zhenti/finance-jichu.md` 开头的「按课汇总」给出各课题数。
+基金产品的节点是 `jijin`，基金公司（管理人与托管人）的节点是 `jijingongsi`，不要混用。讲某一课时，本课的真题是「题型地图」里对应本课的全部题型在题库里的题；真题库 `<题库>/zhenti/finance-jichu.md` 开头的「按课汇总」（只读到第一个 `###` 之前，不整个读；读法见 TEMPLATE.md「读题库 md 的规矩」）给出各课题数。
 
 ## 4. 大纲在对话里的格式
 

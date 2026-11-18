@@ -129,3 +129,31 @@ test('guokao 组练过关但有错题时，待回顾写 lesson: null；没过关
   }
   assert.doesNotMatch(guokao[0], /（`lesson` 写策略课 id）/);
 });
+
+test('guokao 读题库 md 的规矩：不读整个 md、先 grep 定位单个条目、不读 hold 条目', () => {
+  for (const [f, text] of [['TEMPLATE.md', guokao[0]], ['lesson-guide.md', guokao[2]]]) {
+    assert.match(text, /不(能)?(要)?(用 Read )?(整个|整份|整本)读/, `${f} 写明不整个读 <slug>.md`);
+    assert.ok(text.includes("grep -n '^### <行标签>-<题号>$'"), `${f} 写明用 grep 定位单个条目`);
+    assert.ok(text.includes('offset') && text.includes('limit'), `${f} 写明 Read 用 offset/limit`);
+    assert.match(text, /hold[^\n]*(不读|不能读|不要读)|(不读|不能读|不要读)[^\n]*hold/, `${f} 写明不读 hold 条目`);
+  }
+  // 「本课有哪些题」来自 data.js，不是 md
+  assert.match(guokao[2], /data\.js[^\n]*type/, 'lesson-guide.md 的「本课有哪些题」取自 data.js 的 type');
+  assert.doesNotMatch(guokao[2], /在题库 md 里归到这些题型的条目/);
+});
+
+test('guokao 读 md 开头必须写明读到第一个 ### 条目为止', () => {
+  for (const [f, text] of [['TEMPLATE.md', guokao[0]], ['lesson-guide.md', guokao[2]]]) {
+    assert.match(text, /第一个 `###`/, `${f} 写明读到第一个 ### 之前`);
+  }
+});
+
+test('guokao 重开课程有可行的办法：保留模板数据和两张表格卡，进度清零后跑 sync；续学示例与真实大纲一致', () => {
+  const t = guokao[0];
+  assert.match(t, /重开一门国考课/);
+  for (const w of ['`template`、`templateData`、`series`', '`generated`', '`status` 设 `"todo"`', '`mastered` 设 `false`', '`cards` 设 `[]`', '`review` 设 `[]`', '尚未开始', '`updatedAt`', 'guokao.mjs sync']) {
+    assert.ok(t.includes(w), w);
+  }
+  // 续学回顾的示例：排列组合与概率是数量关系 16 课里的第 4 课，已讲 3 课
+  assert.match(guokao[2], /第 4 课「排列组合与概率」（已讲 3 \/ 16 课/);
+});
