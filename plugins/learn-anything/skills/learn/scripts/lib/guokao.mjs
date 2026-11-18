@@ -1,6 +1,11 @@
 // guokao 模板的公共函数：迁移脚本和模板自己的脚本共用。
 // 两张由 templateData.growth 生成的表格卡（题型地图、真题覆盖）带 generated 标记，用标记找到它们、原地重写。
-// 这里出错抛普通 Error，由调用方决定怎么报。
+// 表格和迁移相关的函数出错抛普通 Error，由调用方决定怎么报；读题库、同步题库的函数抛 MigrateError（命令行把它打成 ✗ 行）。
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
+import { isSafeDir } from './course-index.mjs';
+import { MigrateError, isInside, loadOldCourse } from './migrate-common.mjs';
+
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const list = (v) => (Array.isArray(v) ? v : []);
 
@@ -124,4 +129,116 @@ export function inferMastered(lesson) {
     for (const it of list(c.items)) if (isObj(it) && typeof it.ok === 'boolean') last = it.ok;
   }
   return last;
+}
+
+// ---- 题库（guokao_sprint 仓库的 guokao-sprint/references/）：只读 ----
+
+// 仓库路径不能用就返回一句说明，能用返回 null
+export function repoProblem(repo) {
+  if (typeof repo !== 'string' || repo.trim() === '') return '题库仓库路径是空的，请先在配置里设置 guokao_repo';
+  if (repo.includes('${')) return `题库仓库路径里有没展开的变量：${repo}`;
+  if (!path.isAbsolute(repo)) return `题库仓库路径必须是绝对路径：${repo}`;
+  const outlines = path.join(repo, 'guokao-sprint', 'references', 'outlines.data.js');
+  if (!existsSync(outlines)) return `题库仓库里找不到 ${outlines}`;
+  return null;
+}
+
+const slugOk = (slug) => typeof slug === 'string' && isSafeDir(slug) && !slug.includes('/');
+
+// 读题库。outline(slug)、zhenti(slug) 没有这门课时返回 null；readImage(rel) 读 zhenti/ 下的题图
+export function loadRepo(repo) {
+  const problem = repoProblem(repo);
+  if (problem) throw new MigrateError(problem);
+  const refs = path.join(repo, 'guokao-sprint', 'references');
+  let outlines;
+  return {
+    refs,
+    outline(slug) {
+      if (!slugOk(slug)) throw new MigrateError(`课程的 slug 不合法：${JSON.stringify(slug)}`);
+      outlines ??= loadOldCourse(path.join(refs, 'outlines.data.js'), 'GUOKAO_OUTLINES');
+      return Object.hasOwn(outlines, slug) && isObj(outlines[slug]) ? outlines[slug] : null;
+    },
+    zhenti(slug) {
+      if (!slugOk(slug)) throw new MigrateError(`课程的 slug 不合法：${JSON.stringify(slug)}`);
+      const file = path.join(refs, 'zhenti', `${slug}.data.js`);
+      if (!existsSync(file)) return null;
+      const z = loadOldCourse(file, 'GUOKAO_ZHENTI');
+      if (z.module !== undefined && z.module !== slug) throw new MigrateError(`${file} 的 module 是 ${JSON.stringify(z.module)}，与 ${slug} 不符`);
+      return z;
+    },
+    readImage(rel) {
+      if (!isSafeDir(rel)) throw new MigrateError(`题图路径不是 zhenti/ 内的相对路径：${JSON.stringify(rel)}`);
+      const file = path.join(refs, 'zhenti', rel);
+      let real;
+      let root;
+      try {
+        root = realpathSync.native(refs);
+        real = realpathSync.native(file);
+      } catch {
+        throw new MigrateError(`找不到题图：${file}`);
+      }
+      if (!isInside(real, root)) throw new MigrateError(`题图不在题库的 references 里：${file}`);
+      return readFileSync(real);
+    },
+  };
+}
+
+export const questionKey = (item) => `${item.year}-${item.no}`;
+
+const lessonIds = (ref) => (Array.isArray(ref) ? ref : [ref]);
+
+// 按题库重算 templateData.growth：返回新的 growth，不改传入的对象。
+// 题型地图：count 取题库，lesson 以课程为准；题库有、课程没有的节点按 outline 补进来。
+// 真题覆盖：years、items 换成题库的，课程里已有的 demo 标记按 questionKey 保留（题库里没有或已是 hold 的题丢掉标记，列进 dropped）。
+// zhenti 为 null（题库没有这门课的真题清单）时 growth 原样返回。
+export function syncGrowth(course, zhenti, outline) {
+  const growth = structuredClone(list(course.templateData?.growth));
+  const added = [];
+  const dropped = [];
+  if (!isObj(zhenti)) return { growth, dropped, added };
+
+  const courseLessons = list(course.lessons).filter(isObj).map((l) => l.id);
+  const bankNodes = list(zhenti.nodes).filter(isObj);
+  let typemap = growth.find((g) => isObj(g) && g.kind === 'typemap');
+  if (!typemap) {
+    const t = outline?.typemap;
+    typemap = { kind: 'typemap', title: typeof t?.title === 'string' && t.title ? t.title : '题型地图', nodes: [] };
+    growth.unshift(typemap);
+  }
+  typemap.nodes = list(typemap.nodes);
+  for (const n of typemap.nodes) {
+    const bank = isObj(n) ? bankNodes.find((b) => b.id === n.id) : undefined;
+    if (bank && isObj(bank.count)) n.count = bank.count;
+  }
+  for (const bank of bankNodes) {
+    if (typemap.nodes.some((n) => isObj(n) && n.id === bank.id)) continue;
+    const spec = list(outline?.typemap?.nodes).find((n) => isObj(n) && n.id === bank.id);
+    if (!spec) throw new MigrateError(`题库有新题型 ${bank.id}，但课程里没有，仓库大纲里也找不到它，补不进来`);
+    const missing = lessonIds(spec.lesson).filter((id) => !courseLessons.includes(id));
+    if (missing.length || spec.lesson === undefined) {
+      throw new MigrateError(`新题型 ${bank.id} 对应的课 ${missing.join('、') || '（大纲没写）'} 不在课程里，补不进来`);
+    }
+    const node = { id: spec.id };
+    for (const k of ['label', 'methods']) if (spec[k] !== undefined) node[k] = spec[k];
+    node.lesson = spec.lesson;
+    if (isObj(bank.count)) node.count = bank.count;
+    typemap.nodes.push(node);
+    added.push(bank.id);
+  }
+
+  const items = list(zhenti.items).filter(isObj);
+  const oldExamgrid = growth.find((g) => isObj(g) && g.kind === 'examgrid');
+  const demoKeys = new Set(list(oldExamgrid?.items).filter((it) => isObj(it) && it.demo === true).map(questionKey));
+  const holdKeys = new Set(items.filter((it) => it.hold).map(questionKey));
+  const bankKeys = new Set(items.map(questionKey));
+  for (const key of demoKeys) if (!bankKeys.has(key) || holdKeys.has(key)) dropped.push(key);
+  const newItems = items.map((it) => {
+    const { demo, ...rest } = it;
+    return demoKeys.has(questionKey(it)) && !it.hold ? { ...rest, demo: true } : rest;
+  });
+  const examgrid = oldExamgrid ?? { kind: 'examgrid', title: '真题覆盖' };
+  examgrid.years = list(zhenti.years);
+  examgrid.items = newItems;
+  if (!oldExamgrid) growth.push(examgrid);
+  return { growth, dropped, added };
 }
