@@ -1,0 +1,17 @@
+{
+  "description": "新会话开始时，提醒各课程里还没解决的待回顾条目（每天最多一次）。Codex 的 hook 拿不到插件配置，课程目录由脚本从配置文件里读。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/skills/learn/scripts/review-reminder.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

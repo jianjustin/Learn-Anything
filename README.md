@@ -2,9 +2,9 @@
 
 English | [简体中文](README.zh-CN.md)
 
-learn-anything is a Claude Code plugin for learning a topic systematically. You say what you want to learn. It asks why you are learning it and what you already know, researches the topic on the web, and proposes a course outline with sources. Then it teaches the course in short segments and checks what you learned after each lesson. Content and progress are kept in a local, offline course page, so you can pick up where you left off in a later session.
+learn-anything is a Claude Code plugin (it also installs into Codex) for learning a topic systematically. You say what you want to learn. It asks why you are learning it and what you already know, researches the topic on the web, and proposes a course outline with sources. Then it teaches the course in short segments and checks what you learned after each lesson. Content and progress are kept in a local, offline course page, so you can pick up where you left off in a later session.
 
-This version targets **Claude Code only**, and requires **node 20 or later** (the plugin's scripts and its reminder hook run on node).
+It supports **Claude Code** and **Codex** (see "Using it in Codex" for the Codex install), and requires **node 20 or later** (the plugin's scripts and its reminder hook run on node).
 
 ## What it does
 
@@ -56,6 +56,38 @@ Other options:
 - `--uninstall`: for each configuration directory, uninstall the plugin and remove the marketplace, skipping a step whose target is already gone. It does not touch any file in your courses directory. It cannot be combined with `--reinstall`.
 - When a directory given with `--config-dir` does not exist, the script prints a one-line notice and carries on.
 - Exit codes: 2 on an unknown argument, a `--courses-dir` or `--guokao-repo` value that is empty or not an absolute path, `--reinstall` together with `--uninstall`, or `--guokao-repo` together with `--uninstall`. The script exits with code 1 when `claude` cannot be found, node is older than 20, `HOME` is not set, or a command fails. A failure in one configuration directory does not stop the others, and the failing directory is named in the output.
+
+## Using it in Codex
+
+The same plugin also installs into the Codex CLI and the Codex desktop app. From the repository root, run:
+
+```bash
+bash install-codex.sh --courses-dir <courses directory>
+```
+
+Add `--guokao-repo <exam bank repository>` for the civil-service exam, as with `install.sh`. The script runs, in order:
+
+1. `codex plugin marketplace add <repository root>`: adds the repository root as a local marketplace (named `learn-anything-local`);
+2. `codex plugin add learn-anything@learn-anything-local`;
+3. when `--courses-dir` or `--guokao-repo` is given, `node plugins/learn-anything/skills/learn/scripts/config.mjs set ...` to write them to the config file.
+
+Start a new Codex session afterwards and say "I want to learn xx" or "continue learning".
+
+How it differs from Claude Code:
+
+- **Settings live in a config file.** Codex has no plugin options, so the courses directory and the exam bank repository are stored in `~/.config/learn-anything/config.json` (under `XDG_CONFIG_HOME` if that is set; the `LEARN_ANYTHING_CONFIG` environment variable can name the file directly). Writes merge by key, so giving one option does not clear the other. To change the directory, re-run `bash install-codex.sh --courses-dir <new directory>`; to see the current settings, run `node plugins/learn-anything/skills/learn/scripts/config.mjs`. When nothing is configured, the skill stops and tells you how to configure it.
+- **After changing the repository, run `bash install-codex.sh --reinstall`.** Codex runs a cached copy (under `~/.codex/plugins/cache/`); reinstalling replaces it with the new version. Start a new session afterwards.
+- **The sandbox.** The courses directory is usually outside the working directory, so Codex's sandbox blocks writes there or asks for approval. To avoid approving every write, add the courses directory to the writable roots in `~/.codex/config.toml` (if the section already exists, add the path to it):
+
+  ```toml
+  [sandbox_workspace_write]
+  writable_roots = ["<courses directory>"]
+  ```
+
+- **The review reminder.** Codex marks the plugin's hook as untrusted the first time it loads it, and runs it only after you trust it once in Codex (the hook only reads course data and prints one line). Without it you can still learn as usual; you just get no reminder when a session starts.
+- **Prompts and subagents.** Codex has no choice pop-up, so where you need to choose, the options are listed as a numbered list in the conversation and you reply. Research and grading are still done by subagents that do not inherit the conversation (Codex's `spawn_agent`); when subagents are unavailable, the course falls back to no research and grading on the spot, and the outline says it was not checked against sources.
+
+Other options: `--dry-run` prints the commands without running them; `--uninstall` removes the plugin and the marketplace and leaves the config file and the courses directory alone. Re-running is safe: the script first checks the state with `codex plugin marketplace list --json` and `codex plugin list --json` and skips what is already there. It works on the configuration directory `codex` currently uses (`CODEX_HOME`, or `~/.codex` when that is not set). Exit codes match `install.sh`: 2 for bad arguments; 1 when `codex` cannot be found, node is older than 20, or a command fails.
 
 ## Where courses are stored
 
@@ -191,7 +223,8 @@ The repository root is a local marketplace and the plugin itself is in `plugins/
 plugins/learn-anything/   # the plugin: skill, subagents, hook, scripts, page templates, domain templates
 tests/                    # unit tests, page tests, fixtures, helpers
 examples/                 # example courses
-install.sh                # install script
+install.sh                # install script (Claude Code)
+install-codex.sh          # install script (Codex)
 ```
 
 Run all the tests:
@@ -200,9 +233,9 @@ Run all the tests:
 bash tests/run-all.sh
 ```
 
-It runs, in order: the unit tests (`node --test tests/unit`); the page tests (`node --test tests/e2e`); `bash tests/install.test.sh`; `claude plugin validate plugins/learn-anything --strict`. Every step runs, and if any step fails the final exit code is 1. It does not change the working tree: the two page copies in `examples/` must be byte-identical to the templates, so after changing a page template run `bash tests/run-all.sh --sync`, which copies the templates into `examples/` before running the tests.
+It runs, in order: the unit tests (`node --test tests/unit`); the page tests (`node --test tests/e2e`); `bash tests/install.test.sh`; `bash tests/install-codex.test.sh`; `claude plugin validate plugins/learn-anything --strict`. Every step runs, and if any step fails the final exit code is 1. It does not change the working tree: the two page copies in `examples/` must be byte-identical to the templates, so after changing a page template run `bash tests/run-all.sh --sync`, which copies the templates into `examples/` before running the tests.
 
-The page tests need `playwright-core` and a local Chrome (or Chromium). `playwright-core` is found if it is installed locally, at the path in `PLAYWRIGHT_CORE_PATH`, or in the global npm directory. A skipped page test (for example, when the browser cannot start) counts as a failure. Some `install.sh` tests use `--dry-run` and some really run the script; when they do, `HOME` is a temporary directory and the first `claude` on `PATH` is a stub that only records its calls, so no real Claude Code configuration is touched.
+The page tests need `playwright-core` and a local Chrome (or Chromium). `playwright-core` is found if it is installed locally, at the path in `PLAYWRIGHT_CORE_PATH`, or in the global npm directory. A skipped page test (for example, when the browser cannot start) counts as a failure. Some `install.sh` tests use `--dry-run` and some really run the script; when they do, `HOME` is a temporary directory and the first `claude` on `PATH` is a stub that only records its calls, so no real Claude Code configuration is touched. The `install-codex.sh` tests work the same way, with a stub `codex` and a temporary `HOME`.
 
 To validate one course's data on its own:
 

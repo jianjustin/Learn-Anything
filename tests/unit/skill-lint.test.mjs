@@ -27,7 +27,7 @@ test('正文的章节齐全，篇幅不超过 500 行', () => {
 });
 
 test('正文提到的文件都存在', () => {
-  const all = ['SKILL.md', 'references/kickoff.md', 'references/lesson-guide.md', 'references/data-format.md'].map(read).join('\n');
+  const all = ['SKILL.md', 'references/kickoff.md', 'references/lesson-guide.md', 'references/data-format.md', 'references/codex.md'].map(read).join('\n');
   const rels = new Set([...all.matchAll(/(?:references|scripts|assets|templates)\/[\w./-]+\.(?:md|mjs|html)/g)].map((m) => m[0]));
   assert.ok(rels.size >= 7);
   for (const rel of rels) assert.ok(existsSync(path.join(SKILL_DIR, rel)), rel);
@@ -116,4 +116,24 @@ test('data-format.md：resume.note 是纯文本；todo 的课可以寄存卡片'
   assert.ok(!rich.includes('resume.note'));
   assert.ok(plainLine.includes('`resume.note`'));
   assert.ok(doc.includes('`todo` 的课可以寄存卡片，讲到之前页面不显示'));
+});
+
+test('Codex：路径约定指向 references/codex.md，没配置就停下那段只适用于 Claude Code', () => {
+  const paths = body.split('## 路径约定')[1].split('\n## ')[0];
+  assert.ok(paths.includes('**在 Codex 里**') && paths.includes('`references/codex.md`'));
+  assert.ok(paths.includes('只适用于 Claude Code'));
+  const table = body.split('## 什么时候读 references')[1].split('\n## ')[0];
+  assert.ok(table.includes('`references/codex.md`'));
+});
+
+test('codex.md：用 config.mjs 拿路径、子代理不继承对话、弹窗改为对话里列选项、评分原话仍在最后', () => {
+  const doc = read('references/codex.md');
+  for (const w of ['node <skill 目录>/scripts/config.mjs', 'config.mjs set --courses-dir', 'install-codex.sh --courses-dir', '--guokao-repo',
+    '`spawn_agent`', '`fork_turns` 设为 `"none"`', '`wait_agent`', '../../agents/', '`AskUserQuestion`', '结束本轮', '`researched: "no"`', '当场判',
+    '`${CLAUDE_SKILL_DIR}`', '`${user_config.courses_dir}`', '`${user_config.guokao_repo}`']) {
+    assert.ok(doc.includes(w), w);
+  }
+  assert.ok(doc.includes('「学习者的原话」必须保持在最后'));
+  assert.ok(existsSync(path.join(SKILL_DIR, '../../agents/course-researcher.md')) && existsSync(path.join(SKILL_DIR, '../../agents/answer-grader.md')));
+  assert.ok(existsSync(path.join(SKILL_DIR, '../../../../install-codex.sh')));
 });

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// 用法：node review-reminder.mjs <courses_dir>
+// 用法：node review-reminder.mjs [<courses_dir>]
+// 不给 courses_dir（或给空串）时，从配置文件里取（Codex 的 hook 拿不到 userConfig），见 lib/host-config.mjs。
 // SessionStart hook：有待回顾条目、且今天还没提醒过时，stdout 输出一行 JSON；否则什么都不输出。
-// 状态目录取环境变量 CLAUDE_PLUGIN_DATA，没有时取 ~/.cache/learn-anything。
+// 状态目录取环境变量 CLAUDE_PLUGIN_DATA（Codex 也会设置它），没有时取 ~/.cache/learn-anything。
 // 每个新会话都会跑，所以只读 index-data.js 和各课的 course-data.js，任何失败都当作「不提醒」。
 // 退出码恒为 0，不向 stderr 输出。
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -10,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isSafeDir } from './lib/course-index.mjs';
 import { readDataFile } from './lib/data-file.mjs';
+import { readConfig } from './lib/host-config.mjs';
 
 const STATE_FILE = 'review-reminder.json';
 
@@ -76,10 +78,20 @@ function localDate() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// 命令行给了课程目录就用它，否则读配置文件；读不出来返回 null
+export function resolveCoursesDir(arg) {
+  if (typeof arg === 'string' && arg !== '') return arg;
+  try {
+    return readConfig().courses_dir;
+  } catch {
+    return null;
+  }
+}
+
 function main(args) {
   try {
     const stateDir = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), '.cache', 'learn-anything');
-    const out = runReminder({ coursesDir: args[0], stateDir, today: localDate() });
+    const out = runReminder({ coursesDir: resolveCoursesDir(args[0]), stateDir, today: localDate() });
     if (out) process.stdout.write(`${out}\n`);
   } catch {
     // 不能妨碍会话启动

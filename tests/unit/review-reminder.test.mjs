@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PLUGIN_DIR, SCRIPTS_DIR } from '../helpers/paths.mjs';
@@ -70,17 +70,51 @@ test('路径含空格和中文', () => {
   assert.equal(JSON.parse(runReminder({ ...h, today: '2026-11-17' })).systemMessage, MSG(1, 1));
 });
 
-test('命令行：缺参数也退出 0，没有任何输出', () => {
-  const r = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'review-reminder.mjs')], { encoding: 'utf8' });
+test('命令行：缺参数、也没有配置文件时退出 0，没有任何输出', () => {
+  const base = mkdtempSync(path.join(os.tmpdir(), 'la-'));
+  const r = spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'review-reminder.mjs')], {
+    encoding: 'utf8',
+    env: { ...process.env, LEARN_ANYTHING_CONFIG: path.join(base, 'none.json'), CLAUDE_PLUGIN_DATA: path.join(base, 'state') },
+  });
   assert.deepEqual([r.status, r.stdout, r.stderr], [0, '', '']);
 });
 
-test('hooks.json：只在新会话启动时运行', () => {
-  const h = JSON.parse(readFileSync(path.join(PLUGIN_DIR, 'hooks/hooks.json'), 'utf8')).hooks.SessionStart;
+test('命令行：缺参数时从配置文件取课程目录（Codex 的 hook 不带参数）', () => {
+  const h = makeHome([{ slug: 'a', review: 2 }]);
+  const cfg = path.join(path.dirname(h.coursesDir), 'config.json');
+  writeFileSync(cfg, JSON.stringify({ courses_dir: h.coursesDir }));
+  const run = (cfgFile) => spawnSync(process.execPath, [path.join(SCRIPTS_DIR, 'review-reminder.mjs')], {
+    encoding: 'utf8',
+    env: { ...process.env, LEARN_ANYTHING_CONFIG: cfgFile, CLAUDE_PLUGIN_DATA: h.stateDir },
+  });
+  const r = run(cfg);
+  assert.deepEqual([r.status, r.stderr], [0, '']);
+  assert.equal(JSON.parse(r.stdout).systemMessage, MSG(1, 2));
+  // 配置文件读不懂：当作不提醒，仍然退出 0、不输出
+  const bad = path.join(path.dirname(h.coursesDir), 'bad.json');
+  writeFileSync(bad, '{');
+  rmSync(h.stateDir, { recursive: true, force: true });
+  assert.deepEqual([run(bad).status, run(bad).stdout, run(bad).stderr], [0, '', '']);
+});
+
+test('claude-hooks.json：只在新会话启动时运行，课程目录取 userConfig', () => {
+  const h = JSON.parse(readFileSync(path.join(PLUGIN_DIR, 'hooks/claude-hooks.json'), 'utf8')).hooks.SessionStart;
   assert.equal(h.length, 1);
   assert.equal(h[0].matcher, 'startup');
   assert.deepEqual(h[0].hooks[0].args, ['${CLAUDE_PLUGIN_ROOT}/skills/learn/scripts/review-reminder.mjs', '${user_config.courses_dir}']);
   assert.equal(h[0].hooks[0].command, 'node');
+});
+
+test('codex-hooks.json：一条命令字符串，不带 args 和 userConfig 占位符', () => {
+  const h = JSON.parse(readFileSync(path.join(PLUGIN_DIR, 'hooks/codex-hooks.json'), 'utf8')).hooks.SessionStart;
+  assert.equal(h.length, 1);
+  assert.equal(h[0].matcher, 'startup');
+  assert.equal(h[0].hooks[0].command, 'node "${PLUGIN_ROOT}/skills/learn/scripts/review-reminder.mjs"');
+  assert.equal(h[0].hooks[0].args, undefined);
+});
+
+test('没有 hooks/hooks.json：两个宿主都会默认加载它，各自的 hook 文件由清单指定', () => {
+  assert.equal(existsSync(path.join(PLUGIN_DIR, 'hooks/hooks.json')), false);
 });
 
 // ---- 以下是补充的边界测试 ----

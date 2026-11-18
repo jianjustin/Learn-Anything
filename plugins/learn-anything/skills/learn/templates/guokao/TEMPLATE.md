@@ -17,6 +17,8 @@ research: skip
 - 重新运行仓库里的安装脚本：`bash install.sh --guokao-repo <绝对路径>`；
 - 或者运行 `/plugin configure learn-anything@learn-anything-local`，填写「国考题库仓库」。
 
+在 Codex 里，题库路径取 `config.mjs` 输出的 `guokao_repo`，是 `null` 时同样停下，配置方式见 `references/codex.md`（在 skill 目录下）。
+
 下文的写法：
 
 - `<国考题库>`：上面那个仓库根目录的实际路径；`<题库>` 指 `<国考题库>/guokao-sprint/references`。

@@ -5,6 +5,7 @@
   "author": {
     "name": "jianjustin"
   },
+  "hooks": "./hooks/claude-hooks.json",
   "userConfig": {
     "courses_dir": {
       "type": "directory",

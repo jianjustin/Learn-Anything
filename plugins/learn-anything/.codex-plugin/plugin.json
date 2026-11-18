@@ -1,0 +1,33 @@
+{
+  "name": "learn-anything",
+  "version": "0.1.0",
+  "description": "系统学习任意主题：调研生成课程大纲，逐课讲授并出题，用离线课程页和总览页跟踪进度。",
+  "author": {
+    "name": "jianjustin"
+  },
+  "keywords": [
+    "learning",
+    "course",
+    "interview",
+    "guokao"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
+  "interface": {
+    "displayName": "Learn Anything",
+    "shortDescription": "系统学习任意主题，逐课讲授、检验，进度存进离线课程页。",
+    "longDescription": "先问为什么学、已有什么基础，联网调研后给出带资料清单的大纲；确认后分段讲授，每课至少检验一次，讲过和掌握分开记，缺口进待回顾。课程内容和进度存进本地离线课程页，换个会话也能接着学。附带面试准备和国考备考两个领域模板。",
+    "developerName": "jianjustin",
+    "category": "Education & Research",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "我想系统学习宏观经济学",
+      "继续学习",
+      "帮我准备系统设计面试"
+    ]
+  }
+}

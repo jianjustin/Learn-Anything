@@ -2,9 +2,9 @@
 
 [English](README.md) | 简体中文
 
-learn-anything 是一个 Claude Code plugin，用来系统地学一个主题。你说想学什么，它先问清楚你为什么学、已有什么基础，联网调研后给出一份有出处的大纲，然后分段讲授、逐课检验。课程内容和进度都落在一个本地的离线课程页里，换个会话也能从断点接着学。
+learn-anything 是一个 Claude Code plugin（也能装进 Codex），用来系统地学一个主题。你说想学什么，它先问清楚你为什么学、已有什么基础，联网调研后给出一份有出处的大纲，然后分段讲授、逐课检验。课程内容和进度都落在一个本地的离线课程页里，换个会话也能从断点接着学。
 
-这一版只支持 Claude Code，需要 **node 20 或更高版本**（plugin 的脚本和提醒 hook 都用 node 运行）。
+支持 **Claude Code** 和 **Codex**（Codex 的装法见「在 Codex 里使用」），需要 **node 20 或更高版本**（plugin 的脚本和提醒 hook 都用 node 运行）。
 
 ## 它做什么
 
@@ -56,6 +56,38 @@ bash install.sh --courses-dir <课程目录> --guokao-repo <国考题库仓库>
 - `--uninstall`：对每个配置目录卸载 plugin 并移除 marketplace，已经不在的那一步跳过。不会动课程目录里的任何文件。不能和 `--reinstall` 同时给。
 - `--config-dir` 指向的目录不存在时，脚本打印一行提示后照常继续。
 - 退出码：参数不认识、`--courses-dir` 或 `--guokao-repo` 的值为空或不是绝对路径、`--reinstall` 和 `--uninstall` 同时给、`--guokao-repo` 和 `--uninstall` 同时给时，退出码 2；找不到 `claude`、node 低于 20、`HOME` 没有设置时，退出码 1；某条命令失败时也是退出码 1。某个配置目录失败不会拦住后面的目录，失败的目录会在输出里点名。
+
+## 在 Codex 里使用
+
+同一个 plugin 也能装进 Codex CLI / Codex 桌面版。在仓库根目录运行：
+
+```bash
+bash install-codex.sh --courses-dir <课程目录>
+```
+
+学国考时同样加上 `--guokao-repo <题库仓库>`。脚本依次执行：
+
+1. `codex plugin marketplace add <仓库根目录>`：把仓库根目录添加为本地 marketplace（名字 `learn-anything-local`）；
+2. `codex plugin add learn-anything@learn-anything-local`；
+3. 给了 `--courses-dir` 或 `--guokao-repo` 时，运行 `node plugins/learn-anything/skills/learn/scripts/config.mjs set ...`，把这两项写进配置文件。
+
+装完新开一个 Codex 会话，说「我想学 xx」或「继续学习」即可。
+
+和 Claude Code 的不同：
+
+- **配置存在配置文件里。** Codex 没有 plugin 配置项，课程目录和国考题库存在 `~/.config/learn-anything/config.json`（设置了 `XDG_CONFIG_HOME` 就在它下面；环境变量 `LEARN_ANYTHING_CONFIG` 可以直接指定文件）。写入按键合并，只给一项不会清掉另一项。改目录就重新运行 `bash install-codex.sh --courses-dir <新目录>`，查看当前配置运行 `node plugins/learn-anything/skills/learn/scripts/config.mjs`。没配置时 skill 会停下并告诉你怎么配置。
+- **改了仓库之后运行 `bash install-codex.sh --reinstall`。** Codex 运行的是缓存里的拷贝（`~/.codex/plugins/cache/` 下），重装才会换成新版，然后新开一个会话。
+- **沙箱。** 课程目录一般不在当前工作目录里，Codex 的沙箱默认会拦下或要求批准写入。想免去每次批准，在 `~/.codex/config.toml` 里把课程目录加进可写目录（已有这一节就把路径并进去）：
+
+  ```toml
+  [sandbox_workspace_write]
+  writable_roots = ["<课程目录>"]
+  ```
+
+- **待回顾提醒。** Codex 第一次加载 plugin 的 hook 时把它标为未信任，要你在 Codex 里信任一次之后才会运行（hook 只读课程数据、输出一行提醒）。不信任也不影响学习，只是没有开会话时的提醒。
+- **弹窗和子代理。** Codex 里没有选项弹窗，需要你选择的地方会在对话里列出编号选项，你回复即可。调研和评分仍由不继承当前对话的子代理来做（Codex 的 `spawn_agent`）；子代理用不了时退回到不调研、当场评分，大纲会标明未经资料核对。
+
+其他选项：`--dry-run` 只打印要执行的命令；`--uninstall` 移除 plugin 和 marketplace，不动配置文件和课程目录。重复运行是安全的：先用 `codex plugin marketplace list --json` 和 `codex plugin list --json` 查看现状，已有的跳过。处理的是 `codex` 当前使用的配置目录（`CODEX_HOME`，没设置时是 `~/.codex`）。退出码和 `install.sh` 一致：参数不对是 2，找不到 `codex`、node 低于 20 或某条命令失败是 1。
 
 ## 课程存在哪
 
@@ -191,7 +223,8 @@ node plugins/learn-anything/skills/learn/scripts/migrate-guokao.mjs <旧课程�
 plugins/learn-anything/   # plugin：skill、子代理、hook、脚本、页面模板、领域模板
 tests/                    # 单元测试、页面测试、样例数据、辅助代码
 examples/                 # 示例课程
-install.sh                # 安装脚本
+install.sh                # 安装脚本（Claude Code）
+install-codex.sh          # 安装脚本（Codex）
 ```
 
 运行全部测试：
@@ -200,9 +233,9 @@ install.sh                # 安装脚本
 bash tests/run-all.sh
 ```
 
-它依次做：单元测试（`node --test tests/unit`）；页面测试（`node --test tests/e2e`）；`bash tests/install.test.sh`；`claude plugin validate plugins/learn-anything --strict`。每一步都会跑，任何一步失败，最后退出码为 1。它不改工作树：`examples/` 里的两份页面副本必须与模板逐字节一致，改了页面模板之后运行 `bash tests/run-all.sh --sync`，先把模板复制到 `examples/` 再跑测试。
+它依次做：单元测试（`node --test tests/unit`）；页面测试（`node --test tests/e2e`）；`bash tests/install.test.sh`；`bash tests/install-codex.test.sh`；`claude plugin validate plugins/learn-anything --strict`。每一步都会跑，任何一步失败，最后退出码为 1。它不改工作树：`examples/` 里的两份页面副本必须与模板逐字节一致，改了页面模板之后运行 `bash tests/run-all.sh --sync`，先把模板复制到 `examples/` 再跑测试。
 
-页面测试需要 `playwright-core` 和本机的 Chrome（或 Chromium）。`playwright-core` 在本地、`PLAYWRIGHT_CORE_PATH` 指向的位置或 npm 全局目录里找得到即可。页面测试被跳过（比如浏览器启动不了）算失败。`install.sh` 的测试一部分用 `--dry-run`，一部分真正执行；真正执行时 `HOME` 是临时目录，`PATH` 最前面的 `claude` 是一个只记录调用的桩，不会改动任何真实的 Claude Code 配置。
+页面测试需要 `playwright-core` 和本机的 Chrome（或 Chromium）。`playwright-core` 在本地、`PLAYWRIGHT_CORE_PATH` 指向的位置或 npm 全局目录里找得到即可。页面测试被跳过（比如浏览器启动不了）算失败。`install.sh` 的测试一部分用 `--dry-run`，一部分真正执行；真正执行时 `HOME` 是临时目录，`PATH` 最前面的 `claude` 是一个只记录调用的桩，不会改动任何真实的 Claude Code 配置。`install-codex.sh` 的测试同理，用的是桩 `codex` 和临时 `HOME`。
 
 单独校验一门课的数据：
 

@@ -50,6 +50,9 @@ fi
 echo "== bash tests/install.test.sh =="
 bash tests/install.test.sh || status=1
 
+echo "== bash tests/install-codex.test.sh =="
+bash tests/install-codex.test.sh || status=1
+
 echo "== claude plugin validate plugins/learn-anything --strict =="
 claude plugin validate plugins/learn-anything --strict || status=1
 
