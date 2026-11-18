@@ -121,3 +121,11 @@ test('guokao 没有旧格式残留', () => {
     assert.doesNotMatch(guokaoAll, re);
   }
 });
+
+test('guokao 组练过关但有错题时，待回顾写 lesson: null；没过关才指向策略课', () => {
+  for (const [f, text] of [['TEMPLATE.md', guokao[0]], ['lesson-guide.md', guokao[2]]]) {
+    assert.match(text, /过关但有错题[^\n]*"lesson": null/, `${f} 写明过关但有错题时 lesson 为 null`);
+    assert.match(text, /没过关[^\n]*`lesson` 写(策略课|本课) id/, `${f} 写明没过关时 lesson 写策略课 id`);
+  }
+  assert.doesNotMatch(guokao[0], /（`lesson` 写策略课 id）/);
+});
