@@ -18,6 +18,9 @@ test('两个合法样例没有错误也没有警告', () => {
 
 for (const [name, mutate, re] of [
   ['缺 topic', (d) => { delete d.topic; }, /topic/],
+  ['series 不是对象', (d) => { d.series = '投资研究'; }, /series/],
+  ['series.name 为空', (d) => { d.series = { name: ' ', order: 1 }; }, /series\.name/],
+  ['series.order 不是正整数', (d) => { d.series = { name: '投资研究', order: 0 }; }, /series\.order/],
   ['mission 缺字段', (d) => { delete d.mission.target; }, /mission\.target/],
   ['researched 取值非法', (d) => { d.researched = 'maybe'; }, /researched/],
   ['status 取值非法', (d) => { d.lessons[0].status = 'doing'; }, /status/],
@@ -40,6 +43,11 @@ for (const [name, mutate, re] of [
 ]) {
   test(`报错：${name}`, () => assert.match(bad(mutate).errors.join('\n'), re));
 }
+
+test('series 可选，order 也可选', () => {
+  assert.deepEqual(bad((d) => { d.series = { name: '投资研究', order: 2 }; }), { errors: [], warnings: [] });
+  assert.deepEqual(bad((d) => { d.series = { name: '投资研究' }; }), { errors: [], warnings: [] });
+});
 
 test('警告：slug 与目录名不一致', () => {
   const r = bad(() => {}, 'other-dir');

@@ -824,6 +824,13 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
     checkEnum(ctx, 'researched', d.researched, RESEARCHED);
     optionalStr(ctx, '', d, 'notice');
     optionalStr(ctx, '', d, 'updatedAt');
+    if (d.series !== undefined) {
+      if (!isObj(d.series)) ctx.errors.push('series 应为对象');
+      else {
+        if (!isId(d.series.name)) ctx.errors.push('series.name 缺失或为空');
+        if (d.series.order !== undefined && !isPosInt(d.series.order)) ctx.errors.push('series.order 应为正整数，实际是 ' + show(d.series.order));
+      }
+    }
 
     validateResources(ctx, d);
     validateLessons(ctx, d);

@@ -138,6 +138,7 @@
 1. 运行建课命令（SKILL.md「路径约定」），记下它输出的课程页绝对路径。退出码 1 时读 ✗ 后面的信息：slug 不合法就改 slug；课程目录已存在就换 slug 并告诉学习者；其他错误（比如 `index-data.js` 读不懂或写不进去）就停下，把信息原样告诉学习者，不要手改 `index-data.js`，也不要反复换 slug 重试。
 2. 写 `<课程目录>/<slug>/course-data.js`（新建的课 `dir` 等于 slug），字段按 data-format.md 的「建课」清单，内容来自开题：
    - `mission` 来自两个开题问题；`approach` 来自第 5 节；`researched` 来自第 3 节；`template` 是套用的模板名或 `null`。
+   - 这门课是一组系列课中的一门（学习者把一个大目标拆成了几门课，或者说「这是 xx 系列的下一门」）时写 `series`：`name` 是系列名，几个字，看名字就知道是哪组课；`order` 是这门课在系列里的序号。系列里已有课时，先读它们的 `series.name` 照抄，不另起名字。
    - `resources` 和每课的 `readings` 来自第 4 节。
    - `lessons` 按确认后的大纲，第一课 `current`，其余 `todo`，全部 `mastered: false`、`cards: []`。
    - `growth` 按第 5 节建好面板骨架，元素留到各课开课时再加。

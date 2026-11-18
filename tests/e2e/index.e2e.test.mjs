@@ -81,6 +81,45 @@ test('I2 每门课的统计与 progressOf 一致', async (t) => {
   assert.match(await q.locator('.resume-note').innerText(), /<b>第二课<\/b>/);
 });
 
+test('I2b 按系列分区：系列按最近更新排，区内按 order，不属于系列的课放最后', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const at = (h) => `2026-11-17T${String(h).padStart(2, '0')}:00:00+08:00`;
+  const { page } = await open(t, b.browser, [
+    { slug: 'loose-new', mutate: (d) => { d.updatedAt = at(12); } },
+    { slug: 'inv-2', mutate: (d) => { d.updatedAt = at(11); d.series = { name: '投资研究', order: 2 }; } },
+    { slug: 'inv-1', mutate: (d) => { d.updatedAt = at(5); d.series = { name: '投资研究', order: 1 }; d.lessons[0].status = 'done'; } },
+    { slug: 'inv-x', mutate: (d) => { d.updatedAt = at(10); d.series = { name: '投资研究' }; } },
+    { slug: 'sd-1', mutate: (d) => { d.updatedAt = at(9); d.series = { name: '系统设计 <面试>', order: 1 }; } },
+  ]);
+  const sections = await page.locator('#courses > section.series').evaluateAll((els) => els.map((e) => ({
+    name: e.dataset.series,
+    title: e.querySelector('.series-title').textContent,
+    slugs: [...e.querySelectorAll('.course-card')].map((c) => c.dataset.slug),
+  })));
+  assert.deepEqual(sections, [
+    { name: '投资研究', title: '投资研究', slugs: ['inv-1', 'inv-2', 'inv-x'] },
+    { name: '系统设计 <面试>', title: '系统设计 <面试>', slugs: ['sd-1'] },
+    { name: '', title: '其他课程', slugs: ['loose-new'] },
+  ]);
+  const inv = page.locator('section.series[data-series="投资研究"]');
+  assert.equal(await inv.locator('.series-count').innerText(), '3 门');
+  const total = C.progressOf(loadFixture('valid-minimal')).total;
+  assert.equal(await inv.locator('.series-done').innerText(), `1/${total * 3}`);
+  assert.deepEqual(await inv.locator('.order-tag').allInnerTexts(), ['第 1 门', '第 2 门']);
+  assert.equal(await page.locator('section.series-loose .order-tag').count(), 0);
+  assert.match(await page.locator('#summary').innerText(), /共 5 门课，2 个系列/);
+});
+
+test('I2c 都不属于系列时不加分区标题', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const { page } = await open(t, b.browser, [{ slug: 'a' }, { slug: 'b' }]);
+  assert.equal(await page.locator('.series-head').count(), 0);
+  assert.equal(await page.locator('.course-card h2.course-topic').count(), 2);
+  assert.doesNotMatch(await page.locator('#summary').innerText(), /系列/);
+});
+
 test('I3 登记了但目录不存在的课，单独列出', async (t) => {
   const b = await launchOnce();
   if (b.skip) return t.skip(b.skip);

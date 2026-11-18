@@ -68,7 +68,7 @@ body {
   overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
 }
-h1, h2, p, ul { margin: 0; }
+h1, h2, h3, p, ul { margin: 0; }
 ul { padding: 0; list-style: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -90,7 +90,17 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
 #empty-hint strong { color: var(--ink); }
 
 /* ---- 课程卡片 ---- */
-#courses { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+#courses { display: grid; gap: 36px; }
+.course-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+/* ---- 系列分区 ---- */
+.series-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+.series-title { font-size: 20px; line-height: 1.4; font-weight: 700; }
+.series-stats { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.series-stats b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.series-stats .bar { width: 120px; }
+.series-loose .series-title { font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.order-tag { font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 4px; padding: 0 7px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .course-card {
   display: flex;
   flex-direction: column;
@@ -138,7 +148,8 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
   .wrap { padding-left: 16px; padding-right: 16px; }
   .masthead { padding: 26px 0 20px; }
   h1 { font-size: 24px; }
-  #courses { grid-template-columns: minmax(0, 1fr); }
+  .course-grid { grid-template-columns: minmax(0, 1fr); }
+  #courses { gap: 28px; }
 }
 </style>
 </head>
@@ -270,7 +281,11 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
       var d = r.value;
       var p = progressOf(d);
       var t = str(d.updatedAt) ? Date.parse(d.updatedAt) : NaN;
+      var series = isObj(d.series) ? d.series : {};
+      var order = series.order;
       cards.push({
+        series: str(series.name).trim(),
+        order: typeof order === 'number' && isFinite(order) && Math.floor(order) === order && order >= 1 ? order : null,
         slug: slug || str(d.slug) || dir,
         href: dirUrl(dir) + '/course.html',
         topic: str(d.topic) || slug || dir,
@@ -281,12 +296,37 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
       });
     }
     // 更新时间倒序（按时刻比较，不看时区写法）；没有更新时间的排最后，其余保持登记顺序
-    cards.sort(function (a, b) {
-      var x = a.time === null ? -Infinity : a.time;
-      var y = b.time === null ? -Infinity : b.time;
-      return x === y ? 0 : y > x ? 1 : -1;
+    cards.sort(byTimeDesc);
+    return { kind: 'ok', cards: cards, groups: groupBySeries(cards), failures: failures };
+  }
+
+  function timeKey(c) { return c.time === null ? -Infinity : c.time; }
+  function byTimeDesc(a, b) {
+    var x = timeKey(a), y = timeKey(b);
+    return x === y ? 0 : y > x ? 1 : -1;
+  }
+
+  // 按 series.name 分区：[{ name, cards }]，name 为空串的是不属于任何系列的课。
+  // 系列之间按其中最近一次更新排（cards 已按时间倒序，第一次出现的位置就是这个顺序），不属于系列的课放最后；
+  // 系列内按 order 升序，没有 order 的排在后面并保持时间倒序。
+  function groupBySeries(cards) {
+    var groups = [];
+    var byName = Object.create(null);
+    var loose = { name: '', cards: [] };
+    cards.forEach(function (c) {
+      if (!c.series) { loose.cards.push(c); return; }
+      if (!byName[c.series]) { byName[c.series] = { name: c.series, cards: [] }; groups.push(byName[c.series]); }
+      byName[c.series].cards.push(c);
     });
-    return { kind: 'ok', cards: cards, failures: failures };
+    groups.forEach(function (g) {
+      g.cards = g.cards.map(function (c, i) { return { c: c, i: i }; }).sort(function (a, b) {
+        var x = a.c.order === null ? Infinity : a.c.order;
+        var y = b.c.order === null ? Infinity : b.c.order;
+        return x !== y ? x - y : a.i - b.i;
+      }).map(function (w) { return w.c; });
+    });
+    if (loose.cards.length) groups.push(loose);
+    return groups;
   }
 
   // ---------- 渲染 ----------
@@ -307,16 +347,18 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
   }
   function stat(label, cls, value) {
     var s = el('span');
-    s.append(label + ' ', el('b', cls, value));
+    if (label) s.append(label + ' ');
+    s.appendChild(el('b', cls, value));
     return s;
   }
 
-  function renderCard(c) {
+  function renderCard(c, headingTag) {
     var a = el('a', 'course-card');
     a.dataset.slug = c.slug;
     a.setAttribute('href', c.href);
     var head = el('div', 'card-head');
-    head.appendChild(el('h2', 'course-topic', c.topic));
+    head.appendChild(el(headingTag, 'course-topic', c.topic));
+    if (c.series && c.order !== null) head.appendChild(el('span', 'order-tag', '第 ' + c.order + ' 门'));
     if (c.template) head.appendChild(el('span', 'template-tag', c.template));
     var stats = el('div', 'stats');
     stats.append(stat('已讲', 'done-count', c.done + '/' + c.total), stat('已掌握', 'mastered-count', String(c.mastered)), stat('待回顾', 'review-count', String(c.review)));
@@ -330,6 +372,32 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
       a.appendChild(el('p', 'updated', '更新于 ' + new Date(c.time).toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
     }
     return a;
+  }
+
+  function renderGroup(g, headed) {
+    var sec = el('section', 'series' + (g.name ? '' : ' series-loose'));
+    sec.dataset.series = g.name;
+    var grid = el('div', 'course-grid');
+    g.cards.forEach(function (c) { grid.appendChild(renderCard(c, headed ? 'h3' : 'h2')); });
+    if (!headed) { sec.appendChild(grid); return sec; }
+
+    var head = el('div', 'series-head');
+    var title = el('h2', 'series-title', g.name || '其他课程');
+    head.appendChild(title);
+    if (g.name) {
+      var sum = { done: 0, total: 0, mastered: 0 };
+      g.cards.forEach(function (c) { sum.done += c.done; sum.total += c.total; sum.mastered += c.mastered; });
+      var stats = el('div', 'series-stats');
+      stats.append(
+        stat('', 'series-count', g.cards.length + ' 门'),
+        stat('已讲', 'series-done', sum.done + '/' + sum.total),
+        stat('已掌握', 'series-mastered', String(sum.mastered)),
+        barOf(sum.done, sum.mastered, sum.total));
+      head.appendChild(stats);
+    }
+    sec.setAttribute('aria-label', g.name || '其他课程');
+    sec.append(head, grid);
+    return sec;
   }
 
   function renderFailure(f) {
@@ -351,16 +419,20 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
   function render(model) {
     var cards = model.cards || [];
     var failures = model.failures || [];
+    var groups = model.groups || [];
     var list = $('courses');
     list.textContent = '';
-    cards.forEach(function (c) { list.appendChild(renderCard(c)); });
+    // 所有课都不属于系列时不加分区标题，和原来一样平铺
+    var headed = !(groups.length === 1 && groups[0].name === '');
+    groups.forEach(function (g) { list.appendChild(renderGroup(g, headed)); });
     $('courses-section').hidden = cards.length === 0;
     var fl = $('failure-list');
     fl.textContent = '';
     failures.forEach(function (f) { fl.appendChild(renderFailure(f)); });
     $('load-failures').hidden = failures.length === 0;
     showHint(cards.length + failures.length === 0 ? model.kind === 'none' ? 'none' : 'empty' : null);
-    $('summary').textContent = cards.length ? '共 ' + cards.length + ' 门课' + (failures.length ? '，另有 ' + failures.length + ' 门读取失败' : '') : '';
+    var seriesCount = groups.filter(function (g) { return g.name; }).length;
+    $('summary').textContent = cards.length ? '共 ' + cards.length + ' 门课' + (seriesCount ? '，' + seriesCount + ' 个系列' : '') + (failures.length ? '，另有 ' + failures.length + ' 门读取失败' : '') : '';
   }
 
   // ---------- 轮询 ----------
