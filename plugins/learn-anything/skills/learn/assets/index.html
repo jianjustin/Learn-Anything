@@ -100,6 +100,10 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
 .series-stats b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .series-stats .bar { width: 120px; }
 .series-loose .series-title { font-size: 15px; font-weight: 600; color: var(--ink-2); }
+.series-desc { margin: -4px 0 14px; font-size: 14px; color: var(--ink-2); }
+.series-desc summary { width: fit-content; cursor: pointer; font-size: 13px; color: var(--ink-3); }
+.series-desc summary:hover { color: var(--ink-2); }
+.series-desc p { margin-top: 6px; max-width: 80ch; white-space: pre-line; }
 .order-tag { font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 4px; padding: 0 7px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .course-card {
   display: flex;
@@ -285,6 +289,7 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
       var order = series.order;
       cards.push({
         series: str(series.name).trim(),
+        seriesDesc: str(series.description).trim(),
         order: typeof order === 'number' && isFinite(order) && Math.floor(order) === order && order >= 1 ? order : null,
         slug: slug || str(d.slug) || dir,
         href: dirUrl(dir) + '/course.html',
@@ -306,16 +311,17 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
     return x === y ? 0 : y > x ? 1 : -1;
   }
 
-  // 按 series.name 分区：[{ name, cards }]，name 为空串的是不属于任何系列的课。
+  // 按 series.name 分区：[{ name, desc, cards }]，name 为空串的是不属于任何系列的课。
   // 系列之间按其中最近一次更新排（cards 已按时间倒序，第一次出现的位置就是这个顺序），不属于系列的课放最后；
   // 系列内按 order 升序，没有 order 的排在后面并保持时间倒序。
+  // desc 是系列说明：取区内排序后第一门写了 series.description 的课的那一条，都没写就是空串。
   function groupBySeries(cards) {
     var groups = [];
     var byName = Object.create(null);
     var loose = { name: '', cards: [] };
     cards.forEach(function (c) {
       if (!c.series) { loose.cards.push(c); return; }
-      if (!byName[c.series]) { byName[c.series] = { name: c.series, cards: [] }; groups.push(byName[c.series]); }
+      if (!byName[c.series]) { byName[c.series] = { name: c.series, desc: '', cards: [] }; groups.push(byName[c.series]); }
       byName[c.series].cards.push(c);
     });
     groups.forEach(function (g) {
@@ -324,6 +330,7 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
         var y = b.c.order === null ? Infinity : b.c.order;
         return x !== y ? x - y : a.i - b.i;
       }).map(function (w) { return w.c; });
+      g.cards.some(function (c) { g.desc = c.seriesDesc; return !!c.seriesDesc; });
     });
     if (loose.cards.length) groups.push(loose);
     return groups;
@@ -374,7 +381,8 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
     return a;
   }
 
-  function renderGroup(g, headed) {
+  // openDesc：重新渲染之前已经展开了系列说明的系列名，展开状态要保留
+  function renderGroup(g, headed, openDesc) {
     var sec = el('section', 'series' + (g.name ? '' : ' series-loose'));
     sec.dataset.series = g.name;
     var grid = el('div', 'course-grid');
@@ -396,7 +404,15 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
       head.appendChild(stats);
     }
     sec.setAttribute('aria-label', g.name || '其他课程');
-    sec.append(head, grid);
+    sec.appendChild(head);
+    if (g.name && g.desc) {
+      // 系列说明默认折叠
+      var desc = el('details', 'series-desc');
+      desc.open = openDesc.indexOf(g.name) >= 0;
+      desc.append(el('summary', '', '系列说明'), el('p', '', g.desc));
+      sec.appendChild(desc);
+    }
+    sec.appendChild(grid);
     return sec;
   }
 
@@ -421,10 +437,12 @@ main.wrap { padding-top: 28px; padding-bottom: 80px; display: grid; gap: 28px; }
     var failures = model.failures || [];
     var groups = model.groups || [];
     var list = $('courses');
+    var openDesc = [];
+    list.querySelectorAll('details.series-desc[open]').forEach(function (d) { openDesc.push(d.parentNode.dataset.series); });
     list.textContent = '';
     // 所有课都不属于系列时不加分区标题，和原来一样平铺
     var headed = !(groups.length === 1 && groups[0].name === '');
-    groups.forEach(function (g) { list.appendChild(renderGroup(g, headed)); });
+    groups.forEach(function (g) { list.appendChild(renderGroup(g, headed, openDesc)); });
     $('courses-section').hidden = cards.length === 0;
     var fl = $('failure-list');
     fl.textContent = '';

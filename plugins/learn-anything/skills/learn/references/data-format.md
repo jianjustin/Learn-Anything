@@ -18,7 +18,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 ## 2. 文本格式
 
 - **带格式的文本**支持 `**粗体**`、`` `代码` `` 和 `\n` 换行，其余一切 HTML 都转义后按原文显示。适用于：卡片正文（`items`、`text`、`question`、`approach`、`answer`、`q`、`a`、`rubric`、`yours`、`why`、表格的 `headers` 和单元格、对比的 `pros`、`cons`、`conclusion`），`mission` 三项，`approach`，课程 `summary`，`review[].text`，资料 `note`，代码版本的 `note`，时间线事件的 `title` 和 `detail`。
-- **纯文本**，写 `**` 会原样显示：`topic`、`notice`、`series.name`、`resume.note`、课程 `title`、卡片 `title`、对比的 `name`、资料 `title` 和 `author`、延伸阅读 `where`、节点和连线和分组的 `label`、标注 `text`、版本 `label`、`metricLabel`。
+- **纯文本**，写 `**` 会原样显示：`topic`、`notice`、`series.name`、`series.description`、`resume.note`、课程 `title`、卡片 `title`、对比的 `name`、资料 `title` 和 `author`、延伸阅读 `where`、节点和连线和分组的 `label`、标注 `text`、版本 `label`、`metricLabel`。
 - `html` 卡片是唯一渲染 HTML 的地方，见第 6 节。
 
 ## 3. 顶层字段
@@ -35,7 +35,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 | `researched` | 是 | `"yes"` 大纲经资料核对；`"no"` 想核对但做不到；`"skipped"` 模板或学习者决定不调研 |
 | `resources` | 是 | 资料清单，可以为空数组，见第 4 节 |
 | `notice` | 否 | 页面顶部提示条的文字，如「示范案例，请换成你自己的经历」 |
-| `series` | 否 | 这门课属于哪个系列：`{ "name": "投资研究", "order": 2 }`。`name` 必填、纯文本、非空，同一系列的各门课写完全相同的名字；`order` 可选，正整数，是这门课在系列里的序号。总览页按 `name` 分区显示，区内按 `order` 排；不属于任何系列的课不写这个字段 |
+| `series` | 否 | 这门课属于哪个系列：`{ "name": "投资研究", "order": 2 }`。`name` 必填、纯文本、非空，同一系列的各门课写完全相同的名字；`order` 可选，正整数，是这门课在系列里的序号。`description` 可选，是整个系列的说明（各门课怎么分工、建议的学习顺序），纯文本，可以用 `\n` 换行，只写在系列里 `order` 最小的那门课上，改的时候也只改这一处。总览页按 `name` 分区显示，区内按 `order` 排，系列标题下有一栏默认折叠的「系列说明」，内容取区内第一门写了 `description` 的课的那一条；不属于任何系列的课不写这个字段 |
 | `updatedAt` | 建议 | 写入时的当前本地时间，ISO 8601 带时区，如 `"2026-11-17T15:20:00+08:00"`；每次修改都更新。时间用 `date +%Y-%m-%dT%H:%M:%S%z` 现取，把输出末尾的 `+0800` 写成 `+08:00`；不要照抄本文示例里的时间 |
 | `resume` | 建议 | `{ "lesson": "<课程 id>", "note": "讲到哪、下一步讲什么" }`。`note` 一句话，约 60 字以内，页头显示为「断点」；页面打开时定位到 `resume.lesson`，它变了页面会跳过去 |
 | `review` | 是 | 待回顾清单，只放未解决的条目，可以为空数组，见第 5 节 |
@@ -261,7 +261,7 @@ window.LEARN_COURSE = { ……严格 JSON…… };
 - 外壳不对或外壳里不是严格 JSON。
 - 缺少必填字段，或字段类型不对（如 `mastered` 不是布尔、`readings` 不是数组、`col`、`row` 不是 1 到 100 之间的数字，`span` 不是 1 到 100 之间的整数）。
 - `practice` 的一条标了 `skipped: true`，又写了 `yours` 或 `ok`。
-- `series` 不是对象、`series.name` 为空，或 `series.order` 不是正整数。
+- `series` 不是对象、`series.name` 为空、`series.order` 不是正整数，或 `series.description` 不是字符串。
 - `status`、`researched`、资料 `kind`、面板 `kind`、节点 `style`、连线 `style`、`better` 的取值不在枚举内。
 - 课程 id、资料 id、节点 id、版本 id 重复；`current` 多于一个；`lessons` 为空。
 - 引用不存在：`resume.lesson`、`review[].lesson`、`since`、`until`、`routes[].lesson`、`readings[].resource`、`refs`、连线、分组、标注和路线引用的节点。

@@ -829,6 +829,7 @@ details.fold > div { margin-top: 6px; color: var(--ink); }
       else {
         if (!isId(d.series.name)) ctx.errors.push('series.name 缺失或为空');
         if (d.series.order !== undefined && !isPosInt(d.series.order)) ctx.errors.push('series.order 应为正整数，实际是 ' + show(d.series.order));
+        optionalStr(ctx, 'series', d.series, 'description');
       }
     }
 

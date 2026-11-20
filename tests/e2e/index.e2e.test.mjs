@@ -111,6 +111,35 @@ test('I2b 按系列分区：系列按最近更新排，区内按 order，不属�
   assert.match(await page.locator('#summary').innerText(), /共 5 门课，2 个系列/);
 });
 
+test('I2d 系列说明默认折叠，取区内第一门写了说明的课，重新渲染后保留展开状态', async (t) => {
+  const b = await launchOnce();
+  if (b.skip) return t.skip(b.skip);
+  const at = (h) => `2026-11-17T${String(h).padStart(2, '0')}:00:00+08:00`;
+  const { page, home } = await open(t, b.browser, [
+    { slug: 'inv-3', mutate: (d) => { d.updatedAt = at(12); d.series = { name: '投资研究', order: 3, description: '排在后面的说明' }; } },
+    { slug: 'inv-2', mutate: (d) => { d.updatedAt = at(11); d.series = { name: '投资研究', order: 2, description: '建议顺序：① → ②\n先学 <b>第 1 门</b>' }; } },
+    { slug: 'inv-1', mutate: (d) => { d.updatedAt = at(10); d.series = { name: '投资研究', order: 1 }; } },
+    { slug: 'sd-1', mutate: (d) => { d.updatedAt = at(9); d.series = { name: '系统设计', order: 1, description: '  ' }; } },
+    { slug: 'loose', mutate: (d) => { d.updatedAt = at(8); } },
+  ]);
+  const inv = page.locator('section.series[data-series="投资研究"]');
+  const desc = inv.locator('details.series-desc');
+  assert.equal(await desc.count(), 1);
+  assert.equal(await desc.evaluate((e) => e.open), false, '默认折叠');
+  assert.equal(await desc.locator('summary').innerText(), '系列说明');
+  // 取 order 最小的那门写了说明的课；按纯文本显示，不当 HTML
+  assert.equal(await desc.locator('p').evaluate((e) => e.textContent), '建议顺序：① → ②\n先学 <b>第 1 门</b>');
+  assert.equal(await desc.locator('b').count(), 0);
+  // 说明为空白的系列、不属于系列的课都没有这一栏
+  assert.equal(await page.locator('details.series-desc').count(), 1);
+
+  await desc.locator('summary').click();
+  assert.equal(await desc.evaluate((e) => e.open), true);
+  rewriteData(path.join(home, 'inv-1', 'course-data.js'), (d) => { d.lessons[0].status = 'done'; });
+  await eventually(async () => /^1\//.test(await inv.locator('.series-done').innerText()), { message: '进度没有更新' });
+  assert.equal(await desc.evaluate((e) => e.open), true, '重新渲染后仍然展开');
+});
+
 test('I2c 都不属于系列时不加分区标题', async (t) => {
   const b = await launchOnce();
   if (b.skip) return t.skip(b.skip);
